@@ -24,13 +24,13 @@ A GitHub Actions workflow runs daily at 06:00 UTC (and can be triggered manually
 
 Supported source types:
 
-| `source` | Required fields |
-|---|---|
-| `pypi` | `pypi_name` |
-| `github` | `github` (`"owner/repo"`) |
+| Source        | Required fields                                            |
+|---------------|------------------------------------------------------------|
+| `pypi`        | `pypi_name`                                                |
+| `github`      | `github` (`"owner/repo"`)                                  |
 | `sourceforge` | `sourceforge_project`, `sourceforge_path`, `version_regex` |
-| `website` | `url`, `version_regex`, optionally `version_compact` |
-| `svn` | `svn_url` |
+| `website`     | `url`, `version_regex`, optionally `version_compact`       |
+| `svn`         | `svn_url`                                                  |
 
 Any source can also set `upstream_url` to override the link shown in the issue.
 
