@@ -1,0 +1,45 @@
+name: Check AUR Package Updates
+
+on:
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+jobs:
+  check-updates:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write   # needed to commit stale-entry removals to packages.toml
+      issues: write     # needed to open/close/update issues
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          # Use the default GITHUB_TOKEN — contents:write permission above
+          # gives it push access so git push works for packages.toml cleanups.
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Install Subversion
+        # Required for nexttool-svn revision checking.
+        # Falls back to HTTP if unavailable, but having svn is more reliable.
+        run: sudo apt-get install -y --no-install-recommends subversion
+
+      - name: Run update checker
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+        run: uv run python check_updates.py

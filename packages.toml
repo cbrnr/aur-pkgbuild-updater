@@ -1,0 +1,117 @@
+# Upstream source configuration for AUR packages maintained by cbrnr.
+# The package list itself is fetched live from the AUR maintainer API;
+# this file only maps package names to their upstream source metadata.
+#
+# Supported source types and their required fields:
+#
+#   source = "pypi"        pypi_name = "<PyPI package name>"
+#   source = "github"      github = "<owner>/<repo>"
+#   source = "sourceforge" sourceforge_project = "<project>"
+#                          sourceforge_path = "<RSS path>"
+#                          version_regex = '<regex with one capture group>'
+#   source = "website"     url = "<URL>"
+#                          version_regex = '<regex with one capture group>'
+#                          version_compact = true  # e.g. "214" → "2.14"
+#   source = "svn"         svn_url = "<SVN repo URL>"
+#
+# Optional for any source:
+#   upstream_url = "<URL>"  # overrides the auto-derived link shown in issues
+
+[edfbrowser]
+source = "website"
+url = "https://www.teuniz.net/edfbrowser/"
+version_regex = 'edfbrowser_(\d+)_source\.tar\.gz'
+version_compact = true
+
+[libbiosig]
+source = "sourceforge"
+sourceforge_project = "biosig"
+sourceforge_path = "/BioSig for C_C++/src/"
+version_regex = 'biosig-([0-9]+\.[0-9]+\.[0-9]+)\.src\.tar\.xz'
+upstream_url = "https://sourceforge.net/projects/biosig/"
+
+[libxdf]
+source = "github"
+github = "xdf-modules/libxdf"
+
+[nbc]
+source = "sourceforge"
+sourceforge_project = "bricxcc"
+sourceforge_path = "/NBC_NXC/"
+version_regex = 'nbc-([0-9]+\.[0-9]+\.[0-9]+\.r[0-9]+)\.'
+upstream_url = "http://bricxcc.sourceforge.net/nbc/"
+
+[nexttool-svn]
+source = "svn"
+svn_url = "https://svn.code.sf.net/p/bricxcc/code/"
+upstream_url = "https://sourceforge.net/p/bricxcc/code/"
+
+[python-autoreject]
+source = "pypi"
+pypi_name = "autoreject"
+upstream_url = "https://github.com/autoreject/autoreject"
+
+[python-biosig]
+source = "sourceforge"
+sourceforge_project = "biosig"
+sourceforge_path = "/BioSig for C_C++/src/"
+version_regex = 'biosig-([0-9]+\.[0-9]+\.[0-9]+)\.src\.tar\.xz'
+upstream_url = "https://sourceforge.net/projects/biosig/"
+
+[python-edfio]
+source = "pypi"
+pypi_name = "edfio"
+upstream_url = "https://github.com/the-siesta-group/edfio"
+
+[python-h5io]
+source = "pypi"
+pypi_name = "h5io"
+upstream_url = "https://github.com/h5io/h5io"
+
+[python-mne]
+source = "pypi"
+pypi_name = "mne"
+upstream_url = "https://github.com/mne-tools/mne-python"
+
+[python-mne-qt-browser]
+source = "pypi"
+pypi_name = "mne-qt-browser"
+upstream_url = "https://github.com/mne-tools/mne-qt-browser"
+
+[python-mnelab]
+source = "pypi"
+pypi_name = "mnelab"
+upstream_url = "https://github.com/cbrnr/mnelab"
+
+[python-pebble]
+source = "pypi"
+pypi_name = "pebble"
+upstream_url = "https://github.com/noxdafox/pebble"
+
+[python-picard]
+source = "pypi"
+pypi_name = "python-picard"
+upstream_url = "https://github.com/pierreablin/picard"
+
+[python-pybv]
+source = "pypi"
+pypi_name = "pybv"
+upstream_url = "https://github.com/bids-standard/pybv"
+
+[python-pybvrf]
+source = "pypi"
+pypi_name = "pybvrf"
+upstream_url = "https://github.com/cbrnr/pybvrf"
+
+[python-pymatreader]
+source = "pypi"
+pypi_name = "pymatreader"
+
+[python-pyxdf]
+source = "pypi"
+pypi_name = "pyxdf"
+upstream_url = "https://github.com/xdf-modules/pyxdf"
+
+[sigviewer]
+source = "github"
+github = "cbrnr/sigviewer"
