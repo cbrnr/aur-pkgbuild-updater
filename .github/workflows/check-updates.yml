@@ -15,7 +15,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           # Use the default GITHUB_TOKEN — contents:write permission above
           # gives it push access so git push works for packages.toml cleanups.
