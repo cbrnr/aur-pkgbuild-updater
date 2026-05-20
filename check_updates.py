@@ -204,6 +204,21 @@ def get_upstream_version(pkg_config: dict, github_token: str | None = None) -> s
     raise ValueError(f"Unknown source type: {source!r}")
 
 
+def get_checksum(url: str, regex: str) -> str:
+    """Fetch *url* and extract a SHA256 hex string using *regex* (group 1)."""
+    with urllib.request.urlopen(url, timeout=30) as resp:
+        content = resp.read().decode("utf-8", errors="replace")
+    m = re.search(regex, content, re.DOTALL)
+    if not m:
+        raise ValueError(f"Checksum regex '{regex}' found no match at {url}")
+    return m.group(1)
+
+
+def get_source_url(template: str, raw_version: str) -> str:
+    """Expand *template*, substituting ``{raw_version}`` with *raw_version*."""
+    return template.format(raw_version=raw_version)
+
+
 # --------------------------------------------------------------------------------------
 # Version comparison
 # --------------------------------------------------------------------------------------
@@ -273,6 +288,51 @@ def generate_diff(pkgbuild: str, new_version: str) -> str:
             tofile="PKGBUILD (proposed)",
         )
     )
+
+
+def update_pkgbuild_and_srcinfo(
+    pkgname: str,
+    pkgver: str,
+    raw_version: str,
+    checksum: str,
+    source_url_template: str,
+    aur_dir: Path,
+    pkgs_dir: Path,
+) -> None:
+    """Write updated PKGBUILD and .SRCINFO into *pkgs_dir*/{pkgname}/."""
+    source_url = get_source_url(source_url_template, raw_version)
+    # build a regex that matches the old source URL regardless of its version
+    url_pattern = re.escape(source_url_template).replace(
+        re.escape("{raw_version}"), r"\S+"
+    )
+
+    pkgbuild = (aur_dir / "PKGBUILD").read_text()
+    pkgbuild = re.sub(r"^pkgver=.*", f"pkgver={pkgver}", pkgbuild, flags=re.MULTILINE)
+    pkgbuild = re.sub(r"^pkgrel=.*", "pkgrel=1", pkgbuild, flags=re.MULTILINE)
+    pkgbuild = re.sub(
+        r"sha256sums_x86_64=\('.*?'\)",
+        f"sha256sums_x86_64=('{checksum}')",
+        pkgbuild,
+    )
+    pkgbuild = re.sub(url_pattern, lambda m: source_url, pkgbuild)
+
+    srcinfo = (aur_dir / ".SRCINFO").read_text()
+    srcinfo = re.sub(r"pkgver = .*", f"pkgver = {pkgver}", srcinfo)
+    srcinfo = re.sub(r"pkgrel = .*", "pkgrel = 1", srcinfo)
+    srcinfo = re.sub(
+        rf"provides = {re.escape(pkgname)}=.*",
+        f"provides = {pkgname}={pkgver}",
+        srcinfo,
+    )
+    srcinfo = re.sub(url_pattern, lambda m: source_url, srcinfo)
+    srcinfo = re.sub(
+        r"sha256sums_x86_64 = .*", f"sha256sums_x86_64 = {checksum}", srcinfo
+    )
+
+    out_dir = pkgs_dir / pkgname
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "PKGBUILD").write_text(pkgbuild)
+    (out_dir / ".SRCINFO").write_text(srcinfo)
 
 
 # --------------------------------------------------------------------------------------
@@ -522,6 +582,111 @@ def commit_and_push(config_path: Path, stale_keys: set[str]) -> None:
     subprocess.run(["git", "push"], check=True)
 
 
+def create_update_pr(
+    pkgname: str,
+    pkgver: str,
+    raw_version: str,
+    pkg_config: dict,
+    repo_root: Path,
+    tmpdir: str,
+    dry_run: bool,
+) -> None:
+    """Create a PR on GitHub with updated PKGBUILD and .SRCINFO for *pkgname*."""
+    branch = f"update/{pkgname}/{pkgver}"
+
+    # idempotency: skip if the branch already exists on the remote
+    result = subprocess.run(
+        ["git", "ls-remote", "--heads", "origin", f"refs/heads/{branch}"],
+        capture_output=True,
+        text=True,
+        cwd=repo_root,
+    )
+    if result.stdout.strip():
+        print(f"  [skip] Branch {branch!r} already exists")
+        return
+
+    print(f"  [pr] Would create PR: Update {pkgname} to {pkgver}")
+    if dry_run:
+        return
+
+    # clone AUR repo to read current PKGBUILD and .SRCINFO
+    aur_dir = Path(tmpdir) / f"{pkgname}-aur"
+    subprocess.run(
+        [
+            "git",
+            "clone",
+            "--depth=1",
+            f"https://aur.archlinux.org/{pkgname}.git",
+            str(aur_dir),
+        ],
+        capture_output=True,
+        check=True,
+        timeout=60,
+    )
+
+    checksum = get_checksum(pkg_config["url"], pkg_config["checksum_regex"])
+    pkgs_dir = repo_root / "pkgs"
+    update_pkgbuild_and_srcinfo(
+        pkgname,
+        pkgver,
+        raw_version,
+        checksum,
+        pkg_config["source_url_template"],
+        aur_dir,
+        pkgs_dir,
+    )
+
+    subprocess.run(
+        ["git", "config", "user.name", "github-actions[bot]"], check=True, cwd=repo_root
+    )
+    subprocess.run(
+        [
+            "git",
+            "config",
+            "user.email",
+            "github-actions[bot]@users.noreply.github.com",
+        ],
+        check=True,
+        cwd=repo_root,
+    )
+    subprocess.run(["git", "checkout", "-b", branch], check=True, cwd=repo_root)
+
+    pkg_dir = pkgs_dir / pkgname
+    subprocess.run(
+        ["git", "add", str(pkg_dir / "PKGBUILD"), str(pkg_dir / ".SRCINFO")],
+        check=True,
+        cwd=repo_root,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", f"Update {pkgname} to {pkgver}"],
+        check=True,
+        cwd=repo_root,
+    )
+    subprocess.run(["git", "push", "-u", "origin", branch], check=True, cwd=repo_root)
+    subprocess.run(
+        [
+            "gh",
+            "pr",
+            "create",
+            "--title",
+            f"Update {pkgname} to {pkgver}",
+            "--body",
+            (
+                f"Automated update for `{pkgname}` to {pkgver}.\n\n"
+                f"Source: {_upstream_url(pkgname, pkg_config)}"
+            ),
+            "--base",
+            "main",
+            "--head",
+            branch,
+        ],
+        check=True,
+        cwd=repo_root,
+    )
+    subprocess.run(["git", "checkout", "main"], check=True, cwd=repo_root)
+    print(f"  [pr] Created PR: Update {pkgname} to {pkgver}")
+
+
 # --------------------------------------------------------------------------------------
 # Main
 # --------------------------------------------------------------------------------------
@@ -545,6 +710,7 @@ def main() -> None:
 
     config_path = Path(__file__).parent / "packages.toml"
     config: dict = load_config(config_path)
+    repo_root = Path(__file__).parent
 
     github_token = os.environ.get("GITHUB_TOKEN")
     github_repo = os.environ.get("GITHUB_REPOSITORY")
@@ -618,35 +784,51 @@ def main() -> None:
                 print(f"  [error] Could not fetch upstream version: {exc}\n")
                 continue
 
-            print(f"  upstream: {upstream_ver}")
+            raw_version = upstream_ver
+            pkgver = raw_version
+            for pattern, replacement in pkg_config.get("version_sub", []):
+                pkgver = re.sub(pattern, replacement, pkgver)
 
-            if not is_outdated(aur_pkgver, upstream_ver):
+            print(f"  upstream: {pkgver}")
+
+            if not is_outdated(aur_pkgver, pkgver):
                 print("  up to date\n")
                 continue
 
             outdated_pkg_names.add(pkgname)
-            print(f"  OUTDATED: {aur_pkgver} → {upstream_ver}")
+            print(f"  OUTDATED: {aur_pkgver} → {pkgver}")
 
-            pkgbuild = get_pkgbuild(pkgname, tmpdir)
-            if not pkgbuild:
-                print("  [error] Could not fetch PKGBUILD\n")
-                continue
+            if pkg_config.get("auto_push"):
+                create_update_pr(
+                    pkgname,
+                    pkgver,
+                    raw_version,
+                    pkg_config,
+                    repo_root,
+                    tmpdir,
+                    dry_run=args.dry_run,
+                )
+            else:
+                pkgbuild = get_pkgbuild(pkgname, tmpdir)
+                if not pkgbuild:
+                    print("  [error] Could not fetch PKGBUILD\n")
+                    continue
 
-            diff = generate_diff(pkgbuild, upstream_ver)
+                diff = generate_diff(pkgbuild, pkgver)
 
-            if args.dry_run:
-                print(f"  --- proposed diff ---\n{diff}")
+                if args.dry_run:
+                    print(f"  --- proposed diff ---\n{diff}")
 
-            manage_update_issue(
-                gh,
-                pkgname,
-                aur_version_str,
-                upstream_ver,
-                _upstream_url(pkgname, pkg_config),
-                diff,
-                open_issues,
-                dry_run=args.dry_run,
-            )
+                manage_update_issue(
+                    gh,
+                    pkgname,
+                    aur_version_str,
+                    pkgver,
+                    _upstream_url(pkgname, pkg_config),
+                    diff,
+                    open_issues,
+                    dry_run=args.dry_run,
+                )
             print()
 
     # ---- Step 7: Close resolved issues ------------------------------------
