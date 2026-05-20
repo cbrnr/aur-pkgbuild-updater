@@ -1,0 +1,58 @@
+name: Push to AUR
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+jobs:
+  push-to-aur:
+    if: >
+      github.event.pull_request.merged == true &&
+      startsWith(github.event.pull_request.head.ref, 'update/')
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Parse package name and version from branch
+        id: info
+        run: |
+          BRANCH="${{ github.event.pull_request.head.ref }}"
+          # branch format: update/{pkgname}/{pkgver}
+          PKGNAME=$(echo "$BRANCH" | cut -d/ -f2)
+          PKGVER=$(echo "$BRANCH" | cut -d/ -f3-)
+          echo "pkgname=${PKGNAME}" >> $GITHUB_OUTPUT
+          echo "pkgver=${PKGVER}" >> $GITHUB_OUTPUT
+
+      - name: Set up SSH for AUR
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.AUR_SSH_KEY }}
+
+      - name: Add AUR to known hosts
+        run: ssh-keyscan aur.archlinux.org >> ~/.ssh/known_hosts
+
+      - name: Clone AUR package repository
+        run: |
+          git clone \
+            ssh://aur@aur.archlinux.org/${{ steps.info.outputs.pkgname }}.git \
+            aur-pkg
+
+      - name: Copy updated files
+        run: |
+          cp pkgs/${{ steps.info.outputs.pkgname }}/PKGBUILD aur-pkg/PKGBUILD
+          cp pkgs/${{ steps.info.outputs.pkgname }}/.SRCINFO aur-pkg/.SRCINFO
+
+      - name: Commit and push to AUR
+        run: |
+          cd aur-pkg
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add PKGBUILD .SRCINFO
+          git commit -m "Update to ${{ steps.info.outputs.pkgver }}"
+          git push

@@ -15,7 +15,20 @@
 #   source = "svn"         svn_url = "<SVN repo URL>"
 #
 # Optional for any source:
-#   upstream_url = "<URL>"  # overrides the auto-derived link shown in issues
+#   upstream_url = "<URL>"
+#       Overrides the auto-derived link shown in issues.
+#   version_sub = [["pattern", "replacement"], ...]
+#       re.sub pairs applied in order to the raw captured version to produce
+#       pkgver (e.g. [["-", "."]] turns "2025.05.0-496" into "2025.05.0.496").
+#   checksum_regex = '<regex with one capture group>'
+#       Extracts a SHA256 hex string from the same url; matched with re.DOTALL
+#       so it can span lines.
+#   source_url_template = "<template with {raw_version}>"
+#       Binary source URL template; {raw_version} is the version before any
+#       version_sub transforms.
+#   auto_push = true
+#       Push a PR with updated pkgs/{pkgname}/PKGBUILD and .SRCINFO instead
+#       of opening a GitHub issue.
 
 [edfbrowser]
 source = "website"
@@ -97,6 +110,16 @@ upstream_url = "https://github.com/pierreablin/picard"
 source = "pypi"
 pypi_name = "pybv"
 upstream_url = "https://github.com/bids-standard/pybv"
+
+[rstudio-desktop-bin]
+source = "website"
+url = "https://live-rstudio.pantheonsite.io/download/rstudio-desktop/?posit_iframe=1"
+version_regex = 'rstudio-([0-9]+\.[0-9]+\.[0-9]+-[0-9]+)-amd64\.deb'
+version_sub = [["-", "."]]
+checksum_regex = 'rstudio-[0-9]+\.[0-9]+\.[0-9]+-[0-9]+-amd64\.deb.*?([a-f0-9]{64})'
+source_url_template = "https://download1.rstudio.org/electron/jammy/amd64/rstudio-{raw_version}-amd64.deb"
+auto_push = true
+upstream_url = "https://posit.co/download/rstudio-desktop/"
 
 [python-pybvrf]
 source = "pypi"

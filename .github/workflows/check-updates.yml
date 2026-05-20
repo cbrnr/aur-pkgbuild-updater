@@ -10,8 +10,9 @@ jobs:
     runs-on: ubuntu-latest
 
     permissions:
-      contents: write   # needed to commit stale-entry removals to packages.toml
-      issues: write     # needed to open/close/update issues
+      contents: write       # needed to commit stale-entry removals to packages.toml
+      issues: write         # needed to open/close/update issues
+      pull-requests: write  # needed to open PRs for auto_push packages
 
     steps:
       - name: Check out repository
