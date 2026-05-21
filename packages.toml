@@ -28,7 +28,9 @@
 #       version_sub transforms.
 #   auto_push = true
 #       Push a PR with updated pkgs/{pkgname}/PKGBUILD and .SRCINFO instead
-#       of opening a GitHub issue.
+#       of opening a GitHub issue. For source = "pypi", the checksum and
+#       source URL are fetched automatically from the PyPI JSON API; no
+#       additional fields are required.
 
 [edfbrowser]
 source = "website"
@@ -63,6 +65,7 @@ upstream_url = "https://sourceforge.net/p/bricxcc/code/"
 source = "pypi"
 pypi_name = "autoreject"
 upstream_url = "https://github.com/autoreject/autoreject"
+auto_push = true
 
 [python-biosig]
 source = "sourceforge"
@@ -75,41 +78,49 @@ upstream_url = "https://sourceforge.net/projects/biosig/"
 source = "pypi"
 pypi_name = "edfio"
 upstream_url = "https://github.com/the-siesta-group/edfio"
+auto_push = true
 
 [python-h5io]
 source = "pypi"
 pypi_name = "h5io"
 upstream_url = "https://github.com/h5io/h5io"
+auto_push = true
 
 [python-mne]
 source = "pypi"
 pypi_name = "mne"
 upstream_url = "https://github.com/mne-tools/mne-python"
+auto_push = true
 
 [python-mne-qt-browser]
 source = "pypi"
 pypi_name = "mne-qt-browser"
 upstream_url = "https://github.com/mne-tools/mne-qt-browser"
+auto_push = true
 
 [python-mnelab]
 source = "pypi"
 pypi_name = "mnelab"
 upstream_url = "https://github.com/cbrnr/mnelab"
+auto_push = true
 
 [python-pebble]
 source = "pypi"
 pypi_name = "pebble"
 upstream_url = "https://github.com/noxdafox/pebble"
+auto_push = true
 
 [python-picard]
 source = "pypi"
 pypi_name = "python-picard"
 upstream_url = "https://github.com/pierreablin/picard"
+auto_push = true
 
 [python-pybv]
 source = "pypi"
 pypi_name = "pybv"
 upstream_url = "https://github.com/bids-standard/pybv"
+auto_push = true
 
 [rstudio-desktop-bin]
 source = "website"
@@ -125,15 +136,18 @@ upstream_url = "https://posit.co/download/rstudio-desktop/"
 source = "pypi"
 pypi_name = "pybvrf"
 upstream_url = "https://github.com/cbrnr/pybvrf"
+auto_push = true
 
 [python-pymatreader]
 source = "pypi"
 pypi_name = "pymatreader"
+auto_push = true
 
 [python-pyxdf]
 source = "pypi"
 pypi_name = "pyxdf"
 upstream_url = "https://github.com/xdf-modules/pyxdf"
+auto_push = true
 
 [sigviewer]
 source = "github"
