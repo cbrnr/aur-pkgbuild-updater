@@ -605,84 +605,102 @@ def create_update_pr(
     """Create a PR on GitHub with updated PKGBUILD and .SRCINFO for *pkgname*."""
     branch = f"update/{pkgname}/{pkgver}"
 
-    # idempotency: skip if the branch already exists on the remote
-    result = subprocess.run(
+    # check whether the branch and/or a PR already exist on the remote
+    branch_exists = subprocess.run(
         ["git", "ls-remote", "--heads", "origin", f"refs/heads/{branch}"],
         capture_output=True,
         text=True,
         cwd=repo_root,
-    )
-    if result.stdout.strip():
-        print(f"  [skip] Branch {branch!r} already exists")
-        return
+    ).stdout.strip()
 
     print(f"  [pr] Would create PR: Update {pkgname} to {pkgver}")
     if dry_run:
         return
 
-    # clone AUR repo to read current PKGBUILD and .SRCINFO
-    aur_dir = Path(tmpdir) / f"{pkgname}-aur"
-    subprocess.run(
-        [
-            "git",
-            "clone",
-            "--depth=1",
-            f"https://aur.archlinux.org/{pkgname}.git",
-            str(aur_dir),
-        ],
-        capture_output=True,
-        check=True,
-        timeout=60,
-    )
-
-    if pkg_config["source"] == "pypi":
-        source_url, checksum = get_pypi_release_info(pkg_config["pypi_name"], pkgver)
-        url_pattern = r"https://files\.pythonhosted\.org/packages/[^\s'\"]+"
+    if branch_exists:
+        # branch is already there; check whether a PR exists before creating one
+        pr_check = subprocess.run(
+            ["gh", "pr", "list", "--head", branch, "--json", "number"],
+            capture_output=True,
+            text=True,
+            check=True,
+            cwd=repo_root,
+        )
+        if json.loads(pr_check.stdout):
+            print(f"  [skip] Branch and PR for {branch!r} already exist")
+            return
+        # branch exists but PR is missing — fall through to PR creation only
     else:
-        checksum = get_checksum(pkg_config["url"], pkg_config["checksum_regex"])
-        source_url = get_source_url(pkg_config["source_url_template"], raw_version)
-        url_pattern = re.escape(pkg_config["source_url_template"]).replace(
-            re.escape("{raw_version}"), r"\S+"
+        # clone AUR repo to read current PKGBUILD and .SRCINFO
+        aur_dir = Path(tmpdir) / f"{pkgname}-aur"
+        subprocess.run(
+            [
+                "git",
+                "clone",
+                "--depth=1",
+                f"https://aur.archlinux.org/{pkgname}.git",
+                str(aur_dir),
+            ],
+            capture_output=True,
+            check=True,
+            timeout=60,
         )
 
-    pkgs_dir = repo_root / "pkgs"
-    update_pkgbuild_and_srcinfo(
-        pkgname,
-        pkgver,
-        source_url,
-        url_pattern,
-        checksum,
-        aur_dir,
-        pkgs_dir,
-    )
+        if pkg_config["source"] == "pypi":
+            source_url, checksum = get_pypi_release_info(
+                pkg_config["pypi_name"], pkgver
+            )
+            url_pattern = r"https://files\.pythonhosted\.org/packages/[^\s'\"]+"
+        else:
+            checksum = get_checksum(pkg_config["url"], pkg_config["checksum_regex"])
+            source_url = get_source_url(pkg_config["source_url_template"], raw_version)
+            url_pattern = re.escape(pkg_config["source_url_template"]).replace(
+                re.escape("{raw_version}"), r"\S+"
+            )
 
-    subprocess.run(
-        ["git", "config", "user.name", "github-actions[bot]"], check=True, cwd=repo_root
-    )
-    subprocess.run(
-        [
-            "git",
-            "config",
-            "user.email",
-            "github-actions[bot]@users.noreply.github.com",
-        ],
-        check=True,
-        cwd=repo_root,
-    )
-    subprocess.run(["git", "checkout", "-b", branch], check=True, cwd=repo_root)
+        pkgs_dir = repo_root / "pkgs"
+        update_pkgbuild_and_srcinfo(
+            pkgname,
+            pkgver,
+            source_url,
+            url_pattern,
+            checksum,
+            aur_dir,
+            pkgs_dir,
+        )
 
-    pkg_dir = pkgs_dir / pkgname
-    subprocess.run(
-        ["git", "add", str(pkg_dir / "PKGBUILD"), str(pkg_dir / ".SRCINFO")],
-        check=True,
-        cwd=repo_root,
-    )
-    subprocess.run(
-        ["git", "commit", "-m", f"Update {pkgname} to {pkgver}"],
-        check=True,
-        cwd=repo_root,
-    )
-    subprocess.run(["git", "push", "-u", "origin", branch], check=True, cwd=repo_root)
+        subprocess.run(
+            ["git", "config", "user.name", "github-actions[bot]"],
+            check=True,
+            cwd=repo_root,
+        )
+        subprocess.run(
+            [
+                "git",
+                "config",
+                "user.email",
+                "github-actions[bot]@users.noreply.github.com",
+            ],
+            check=True,
+            cwd=repo_root,
+        )
+        subprocess.run(["git", "checkout", "-b", branch], check=True, cwd=repo_root)
+
+        pkg_dir = pkgs_dir / pkgname
+        subprocess.run(
+            ["git", "add", str(pkg_dir / "PKGBUILD"), str(pkg_dir / ".SRCINFO")],
+            check=True,
+            cwd=repo_root,
+        )
+        subprocess.run(
+            ["git", "commit", "-m", f"Update {pkgname} to {pkgver}"],
+            check=True,
+            cwd=repo_root,
+        )
+        subprocess.run(
+            ["git", "push", "-u", "origin", branch], check=True, cwd=repo_root
+        )
+
     subprocess.run(
         [
             "gh",
