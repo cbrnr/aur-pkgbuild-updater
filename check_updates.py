@@ -15,6 +15,7 @@ import difflib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -658,17 +659,6 @@ def create_update_pr(
                 re.escape("{raw_version}"), r"\S+"
             )
 
-        pkgs_dir = repo_root / "pkgs"
-        update_pkgbuild_and_srcinfo(
-            pkgname,
-            pkgver,
-            source_url,
-            url_pattern,
-            checksum,
-            aur_dir,
-            pkgs_dir,
-        )
-
         subprocess.run(
             ["git", "config", "user.name", "github-actions[bot]"],
             check=True,
@@ -686,7 +676,33 @@ def create_update_pr(
         )
         subprocess.run(["git", "checkout", "-b", branch], check=True, cwd=repo_root)
 
+        # commit 1: current AUR state so the next commit shows a real diff
+        pkgs_dir = repo_root / "pkgs"
         pkg_dir = pkgs_dir / pkgname
+        pkg_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(aur_dir / "PKGBUILD", pkg_dir / "PKGBUILD")
+        shutil.copy2(aur_dir / ".SRCINFO", pkg_dir / ".SRCINFO")
+        subprocess.run(
+            ["git", "add", str(pkg_dir / "PKGBUILD"), str(pkg_dir / ".SRCINFO")],
+            check=True,
+            cwd=repo_root,
+        )
+        subprocess.run(
+            ["git", "commit", "-m", f"Add current PKGBUILD and .SRCINFO for {pkgname}"],
+            check=True,
+            cwd=repo_root,
+        )
+
+        # commit 2: the actual version bump
+        update_pkgbuild_and_srcinfo(
+            pkgname,
+            pkgver,
+            source_url,
+            url_pattern,
+            checksum,
+            aur_dir,
+            pkgs_dir,
+        )
         subprocess.run(
             ["git", "add", str(pkg_dir / "PKGBUILD"), str(pkg_dir / ".SRCINFO")],
             check=True,
@@ -721,7 +737,7 @@ def create_update_pr(
         check=True,
         cwd=repo_root,
     )
-    subprocess.run(["git", "checkout", "main"], check=True, cwd=repo_root)
+    subprocess.run(["git", "checkout", "-"], check=True, cwd=repo_root)
     print(f"  [pr] Created PR: Update {pkgname} to {pkgver}")
 
 
