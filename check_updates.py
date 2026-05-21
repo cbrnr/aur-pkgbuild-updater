@@ -657,6 +657,33 @@ def commit_and_push(config_path: Path, stale_keys: set[str]) -> None:
     subprocess.run(["git", "push"], check=True)
 
 
+def delete_stale_update_branches(
+    pkgname: str, repo_root: Path, dry_run: bool
+) -> None:
+    """Delete any remote update/{pkgname}/* branches left over from merged PRs."""
+    result = subprocess.run(
+        ["git", "ls-remote", "--heads", "origin", f"refs/heads/update/{pkgname}/*"],
+        capture_output=True,
+        text=True,
+        cwd=repo_root,
+    )
+    branches = [
+        line.split("\t", 1)[1].removeprefix("refs/heads/")
+        for line in result.stdout.splitlines()
+        if line
+    ]
+    for branch in branches:
+        if dry_run:
+            print(f"  [dry-run] Would delete stale branch {branch!r}")
+        else:
+            subprocess.run(
+                ["git", "push", "origin", "--delete", branch],
+                check=True,
+                cwd=repo_root,
+            )
+            print(f"  [cleanup] Deleted stale branch {branch!r}")
+
+
 def create_update_pr(
     pkgname: str,
     pkgver: str,
@@ -914,7 +941,12 @@ def main() -> None:
             print(f"  upstream: {pkgver}")
 
             if not is_outdated(aur_pkgver, pkgver):
-                print("  up to date\n")
+                print("  up to date")
+                if pkg_config.get("auto_push"):
+                    delete_stale_update_branches(
+                        pkgname, repo_root, dry_run=args.dry_run
+                    )
+                print()
                 continue
 
             outdated_pkg_names.add(pkgname)
