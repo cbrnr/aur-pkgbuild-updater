@@ -96,6 +96,17 @@ def get_pypi_version(pypi_name: str) -> str:
     return data["info"]["version"]
 
 
+def get_pypi_release_info(pypi_name: str, version: str) -> tuple[str, str]:
+    """Return (source_url, sha256) for the sdist of *pypi_name* at *version*."""
+    url = f"https://pypi.org/pypi/{pypi_name}/{version}/json"
+    with urllib.request.urlopen(url, timeout=30) as resp:
+        data = json.loads(resp.read())
+    for entry in data["urls"]:
+        if entry["packagetype"] == "sdist":
+            return entry["url"], entry["digests"]["sha256"]
+    raise ValueError(f"No sdist found for {pypi_name} {version} on PyPI")
+
+
 def get_github_version(repo: str, token: str | None = None) -> str:
     url = f"https://api.github.com/repos/{repo}/releases/latest"
     req = urllib.request.Request(url)
@@ -293,28 +304,27 @@ def generate_diff(pkgbuild: str, new_version: str) -> str:
 def update_pkgbuild_and_srcinfo(
     pkgname: str,
     pkgver: str,
-    raw_version: str,
+    source_url: str,
+    url_pattern: str,
     checksum: str,
-    source_url_template: str,
     aur_dir: Path,
     pkgs_dir: Path,
 ) -> None:
     """Write updated PKGBUILD and .SRCINFO into *pkgs_dir*/{pkgname}/."""
-    source_url = get_source_url(source_url_template, raw_version)
-    # build a regex that matches the old source URL regardless of its version
-    url_pattern = re.escape(source_url_template).replace(
-        re.escape("{raw_version}"), r"\S+"
-    )
-
     pkgbuild = (aur_dir / "PKGBUILD").read_text()
     pkgbuild = re.sub(r"^pkgver=.*", f"pkgver={pkgver}", pkgbuild, flags=re.MULTILINE)
     pkgbuild = re.sub(r"^pkgrel=.*", "pkgrel=1", pkgbuild, flags=re.MULTILINE)
+    pkgbuild = re.sub(url_pattern, lambda m: source_url, pkgbuild)
+    pkgbuild = re.sub(
+        r"sha256sums=\('.*?'\)",
+        f"sha256sums=('{checksum}')",
+        pkgbuild,
+    )
     pkgbuild = re.sub(
         r"sha256sums_x86_64=\('.*?'\)",
         f"sha256sums_x86_64=('{checksum}')",
         pkgbuild,
     )
-    pkgbuild = re.sub(url_pattern, lambda m: source_url, pkgbuild)
 
     srcinfo = (aur_dir / ".SRCINFO").read_text()
     srcinfo = re.sub(r"pkgver = .*", f"pkgver = {pkgver}", srcinfo)
@@ -325,6 +335,7 @@ def update_pkgbuild_and_srcinfo(
         srcinfo,
     )
     srcinfo = re.sub(url_pattern, lambda m: source_url, srcinfo)
+    srcinfo = re.sub(r"sha256sums = .*", f"sha256sums = {checksum}", srcinfo)
     srcinfo = re.sub(
         r"sha256sums_x86_64 = .*", f"sha256sums_x86_64 = {checksum}", srcinfo
     )
@@ -624,14 +635,23 @@ def create_update_pr(
         timeout=60,
     )
 
-    checksum = get_checksum(pkg_config["url"], pkg_config["checksum_regex"])
+    if pkg_config["source"] == "pypi":
+        source_url, checksum = get_pypi_release_info(pkg_config["pypi_name"], pkgver)
+        url_pattern = r"https://files\.pythonhosted\.org/packages/[^\s'\"]+"
+    else:
+        checksum = get_checksum(pkg_config["url"], pkg_config["checksum_regex"])
+        source_url = get_source_url(pkg_config["source_url_template"], raw_version)
+        url_pattern = re.escape(pkg_config["source_url_template"]).replace(
+            re.escape("{raw_version}"), r"\S+"
+        )
+
     pkgs_dir = repo_root / "pkgs"
     update_pkgbuild_and_srcinfo(
         pkgname,
         pkgver,
-        raw_version,
+        source_url,
+        url_pattern,
         checksum,
-        pkg_config["source_url_template"],
         aur_dir,
         pkgs_dir,
     )
