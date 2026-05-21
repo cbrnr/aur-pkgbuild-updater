@@ -12,6 +12,7 @@ Usage:
 
 import argparse
 import difflib
+import hashlib
 import json
 import os
 import re
@@ -302,6 +303,49 @@ def generate_diff(pkgbuild: str, new_version: str) -> str:
     )
 
 
+def _sha256_file(path: Path) -> str:
+    """Return the SHA256 hex digest of a local file."""
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _parse_source_entries(pkgbuild: str, varname: str = "source") -> list[str]:
+    """Return raw entries from a PKGBUILD bash array variable."""
+    m = re.search(rf"{varname}=\(([^)]*)\)", pkgbuild, re.DOTALL)
+    if not m:
+        return []
+    return [a or b for a, b in re.findall(r'"([^"]*)"' + r"|'([^']*)'" , m.group(1))]
+
+
+def _build_checksums(
+    source_entries: list[str], upstream_checksum: str, aur_dir: Path
+) -> list[str]:
+    """Return a sha256 checksum per source entry.
+
+    URL entries (containing ``://``) get the pre-fetched *upstream_checksum*;
+    local file entries are hashed directly from *aur_dir*.
+    """
+    result = []
+    for entry in source_entries:
+        # strip optional destname:: prefix
+        url_part = entry.split("::", 1)[-1]
+        if "://" in url_part:
+            result.append(upstream_checksum)
+        else:
+            result.append(_sha256_file(aur_dir / entry))
+    return result
+
+
+def _format_pkgbuild_array(varname: str, values: list[str]) -> str:
+    """Format a list of quoted strings as a PKGBUILD bash array assignment."""
+    if len(values) == 1:
+        return f"{varname}=('{values[0]}')"
+    prefix = f"{varname}=("
+    indent = " " * len(prefix)
+    lines = [f"{prefix}'{values[0]}'"] + [f"{indent}'{v}'" for v in values[1:]]
+    lines[-1] += ")"
+    return "\n".join(lines)
+
+
 def update_pkgbuild_and_srcinfo(
     pkgname: str,
     pkgver: str,
@@ -316,16 +360,18 @@ def update_pkgbuild_and_srcinfo(
     pkgbuild = re.sub(r"^pkgver=.*", f"pkgver={pkgver}", pkgbuild, flags=re.MULTILINE)
     pkgbuild = re.sub(r"^pkgrel=.*", "pkgrel=1", pkgbuild, flags=re.MULTILINE)
     pkgbuild = re.sub(url_pattern, lambda m: source_url, pkgbuild)
-    pkgbuild = re.sub(
-        r"sha256sums=\('.*?'\)",
-        f"sha256sums=('{checksum}')",
-        pkgbuild,
-    )
-    pkgbuild = re.sub(
-        r"sha256sums_x86_64=\('.*?'\)",
-        f"sha256sums_x86_64=('{checksum}')",
-        pkgbuild,
-    )
+
+    for varname in ("source", "source_x86_64"):
+        entries = _parse_source_entries(pkgbuild, varname)
+        if not entries:
+            continue
+        sums_var = varname.replace("source", "sha256sums")
+        checksums = _build_checksums(entries, checksum, aur_dir)
+        pkgbuild = re.sub(
+            rf"{sums_var}=\([^)]*\)",
+            _format_pkgbuild_array(sums_var, checksums),
+            pkgbuild,
+        )
 
     srcinfo = (aur_dir / ".SRCINFO").read_text()
     srcinfo = re.sub(r"pkgver = .*", f"pkgver = {pkgver}", srcinfo)
@@ -336,10 +382,20 @@ def update_pkgbuild_and_srcinfo(
         srcinfo,
     )
     srcinfo = re.sub(url_pattern, lambda m: source_url, srcinfo)
-    srcinfo = re.sub(r"sha256sums = .*", f"sha256sums = {checksum}", srcinfo)
-    srcinfo = re.sub(
-        r"sha256sums_x86_64 = .*", f"sha256sums_x86_64 = {checksum}", srcinfo
-    )
+
+    # replace each sha256sums block (main and x86_64) in order
+    for varname in ("source", "source_x86_64"):
+        entries = _parse_source_entries(pkgbuild, varname)
+        if not entries:
+            continue
+        sums_key = "sha256sums" + varname[len("source"):]
+        checksums = _build_checksums(entries, checksum, aur_dir)
+        replacement = "\n".join(f"\t{sums_key} = {c}" for c in checksums)
+        srcinfo = re.sub(
+            rf"(\t{sums_key} = [^\n]+\n?)+",
+            replacement + "\n",
+            srcinfo,
+        )
 
     out_dir = pkgs_dir / pkgname
     out_dir.mkdir(parents=True, exist_ok=True)
