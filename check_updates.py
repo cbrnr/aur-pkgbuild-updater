@@ -12,9 +12,11 @@ Usage:
 
 import argparse
 import difflib
+import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -103,7 +105,12 @@ def get_pypi_release_info(pypi_name: str, version: str) -> tuple[str, str]:
         data = json.loads(resp.read())
     for entry in data["urls"]:
         if entry["packagetype"] == "sdist":
-            return entry["url"], entry["digests"]["sha256"]
+            filename = entry["filename"]
+            source_url = (
+                f"https://files.pythonhosted.org/packages/source"
+                f"/{pypi_name[0]}/{pypi_name}/{filename}"
+            )
+            return source_url, entry["digests"]["sha256"]
     raise ValueError(f"No sdist found for {pypi_name} {version} on PyPI")
 
 
@@ -301,6 +308,49 @@ def generate_diff(pkgbuild: str, new_version: str) -> str:
     )
 
 
+def _sha256_file(path: Path) -> str:
+    """Return the SHA256 hex digest of a local file."""
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _parse_source_entries(pkgbuild: str, varname: str = "source") -> list[str]:
+    """Return raw entries from a PKGBUILD bash array variable."""
+    m = re.search(rf"{varname}=\(([^)]*)\)", pkgbuild, re.DOTALL)
+    if not m:
+        return []
+    return [a or b for a, b in re.findall(r'"([^"]*)"' + r"|'([^']*)'" , m.group(1))]
+
+
+def _build_checksums(
+    source_entries: list[str], upstream_checksum: str, aur_dir: Path
+) -> list[str]:
+    """Return a sha256 checksum per source entry.
+
+    URL entries (containing ``://``) get the pre-fetched *upstream_checksum*;
+    local file entries are hashed directly from *aur_dir*.
+    """
+    result = []
+    for entry in source_entries:
+        # strip optional destname:: prefix
+        url_part = entry.split("::", 1)[-1]
+        if "://" in url_part:
+            result.append(upstream_checksum)
+        else:
+            result.append(_sha256_file(aur_dir / entry))
+    return result
+
+
+def _format_pkgbuild_array(varname: str, values: list[str]) -> str:
+    """Format a list of quoted strings as a PKGBUILD bash array assignment."""
+    if len(values) == 1:
+        return f"{varname}=('{values[0]}')"
+    prefix = f"{varname}=("
+    indent = " " * len(prefix)
+    lines = [f"{prefix}'{values[0]}'"] + [f"{indent}'{v}'" for v in values[1:]]
+    lines[-1] += ")"
+    return "\n".join(lines)
+
+
 def update_pkgbuild_and_srcinfo(
     pkgname: str,
     pkgver: str,
@@ -309,22 +359,26 @@ def update_pkgbuild_and_srcinfo(
     checksum: str,
     aur_dir: Path,
     pkgs_dir: Path,
+    replace_pkgbuild_url: bool = True,
 ) -> None:
     """Write updated PKGBUILD and .SRCINFO into *pkgs_dir*/{pkgname}/."""
     pkgbuild = (aur_dir / "PKGBUILD").read_text()
     pkgbuild = re.sub(r"^pkgver=.*", f"pkgver={pkgver}", pkgbuild, flags=re.MULTILINE)
     pkgbuild = re.sub(r"^pkgrel=.*", "pkgrel=1", pkgbuild, flags=re.MULTILINE)
-    pkgbuild = re.sub(url_pattern, lambda m: source_url, pkgbuild)
-    pkgbuild = re.sub(
-        r"sha256sums=\('.*?'\)",
-        f"sha256sums=('{checksum}')",
-        pkgbuild,
-    )
-    pkgbuild = re.sub(
-        r"sha256sums_x86_64=\('.*?'\)",
-        f"sha256sums_x86_64=('{checksum}')",
-        pkgbuild,
-    )
+    if replace_pkgbuild_url:
+        pkgbuild = re.sub(url_pattern, lambda m: source_url, pkgbuild)
+
+    for varname in ("source", "source_x86_64"):
+        entries = _parse_source_entries(pkgbuild, varname)
+        if not entries:
+            continue
+        sums_var = varname.replace("source", "sha256sums")
+        checksums = _build_checksums(entries, checksum, aur_dir)
+        pkgbuild = re.sub(
+            rf"{sums_var}=\([^)]*\)",
+            _format_pkgbuild_array(sums_var, checksums),
+            pkgbuild,
+        )
 
     srcinfo = (aur_dir / ".SRCINFO").read_text()
     srcinfo = re.sub(r"pkgver = .*", f"pkgver = {pkgver}", srcinfo)
@@ -335,10 +389,20 @@ def update_pkgbuild_and_srcinfo(
         srcinfo,
     )
     srcinfo = re.sub(url_pattern, lambda m: source_url, srcinfo)
-    srcinfo = re.sub(r"sha256sums = .*", f"sha256sums = {checksum}", srcinfo)
-    srcinfo = re.sub(
-        r"sha256sums_x86_64 = .*", f"sha256sums_x86_64 = {checksum}", srcinfo
-    )
+
+    # replace each sha256sums block (main and x86_64) in order
+    for varname in ("source", "source_x86_64"):
+        entries = _parse_source_entries(pkgbuild, varname)
+        if not entries:
+            continue
+        sums_key = "sha256sums" + varname[len("source"):]
+        checksums = _build_checksums(entries, checksum, aur_dir)
+        replacement = "\n".join(f"\t{sums_key} = {c}" for c in checksums)
+        srcinfo = re.sub(
+            rf"(\t{sums_key} = [^\n]+\n?)+",
+            replacement + "\n",
+            srcinfo,
+        )
 
     out_dir = pkgs_dir / pkgname
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -605,84 +669,122 @@ def create_update_pr(
     """Create a PR on GitHub with updated PKGBUILD and .SRCINFO for *pkgname*."""
     branch = f"update/{pkgname}/{pkgver}"
 
-    # idempotency: skip if the branch already exists on the remote
-    result = subprocess.run(
+    # check whether the branch and/or a PR already exist on the remote
+    branch_exists = subprocess.run(
         ["git", "ls-remote", "--heads", "origin", f"refs/heads/{branch}"],
         capture_output=True,
         text=True,
         cwd=repo_root,
-    )
-    if result.stdout.strip():
-        print(f"  [skip] Branch {branch!r} already exists")
-        return
+    ).stdout.strip()
 
     print(f"  [pr] Would create PR: Update {pkgname} to {pkgver}")
     if dry_run:
         return
 
-    # clone AUR repo to read current PKGBUILD and .SRCINFO
-    aur_dir = Path(tmpdir) / f"{pkgname}-aur"
-    subprocess.run(
-        [
-            "git",
-            "clone",
-            "--depth=1",
-            f"https://aur.archlinux.org/{pkgname}.git",
-            str(aur_dir),
-        ],
-        capture_output=True,
-        check=True,
-        timeout=60,
-    )
-
-    if pkg_config["source"] == "pypi":
-        source_url, checksum = get_pypi_release_info(pkg_config["pypi_name"], pkgver)
-        url_pattern = r"https://files\.pythonhosted\.org/packages/[^\s'\"]+"
+    if branch_exists:
+        # branch is already there; check whether a PR exists before creating one
+        pr_check = subprocess.run(
+            ["gh", "pr", "list", "--head", branch, "--json", "number"],
+            capture_output=True,
+            text=True,
+            check=True,
+            cwd=repo_root,
+        )
+        if json.loads(pr_check.stdout):
+            print(f"  [skip] Branch and PR for {branch!r} already exist")
+            return
+        # branch exists but PR is missing — fall through to PR creation only
     else:
-        checksum = get_checksum(pkg_config["url"], pkg_config["checksum_regex"])
-        source_url = get_source_url(pkg_config["source_url_template"], raw_version)
-        url_pattern = re.escape(pkg_config["source_url_template"]).replace(
-            re.escape("{raw_version}"), r"\S+"
+        # clone AUR repo to read current PKGBUILD and .SRCINFO
+        aur_dir = Path(tmpdir) / f"{pkgname}-aur"
+        subprocess.run(
+            [
+                "git",
+                "clone",
+                "--depth=1",
+                f"https://aur.archlinux.org/{pkgname}.git",
+                str(aur_dir),
+            ],
+            capture_output=True,
+            check=True,
+            timeout=60,
         )
 
-    pkgs_dir = repo_root / "pkgs"
-    update_pkgbuild_and_srcinfo(
-        pkgname,
-        pkgver,
-        source_url,
-        url_pattern,
-        checksum,
-        aur_dir,
-        pkgs_dir,
-    )
+        if pkg_config["source"] == "pypi":
+            source_url, checksum = get_pypi_release_info(
+                pkg_config["pypi_name"], pkgver
+            )
+            # the PKGBUILD source URL uses $pkgver — updating pkgver= is enough;
+            # only the .SRCINFO (which has a hardcoded URL) needs replacement
+            url_pattern = r"https://files\.pythonhosted\.org/packages/[^\s'\"]+"
+            replace_pkgbuild_url = False
+        else:
+            checksum = get_checksum(pkg_config["url"], pkg_config["checksum_regex"])
+            source_url = get_source_url(pkg_config["source_url_template"], raw_version)
+            url_pattern = re.escape(pkg_config["source_url_template"]).replace(
+                re.escape("{raw_version}"), r"\S+"
+            )
+            replace_pkgbuild_url = True
 
-    subprocess.run(
-        ["git", "config", "user.name", "github-actions[bot]"], check=True, cwd=repo_root
-    )
-    subprocess.run(
-        [
-            "git",
-            "config",
-            "user.email",
-            "github-actions[bot]@users.noreply.github.com",
-        ],
-        check=True,
-        cwd=repo_root,
-    )
-    subprocess.run(["git", "checkout", "-b", branch], check=True, cwd=repo_root)
+        subprocess.run(
+            ["git", "config", "user.name", "github-actions[bot]"],
+            check=True,
+            cwd=repo_root,
+        )
+        subprocess.run(
+            [
+                "git",
+                "config",
+                "user.email",
+                "github-actions[bot]@users.noreply.github.com",
+            ],
+            check=True,
+            cwd=repo_root,
+        )
+        subprocess.run(["git", "checkout", "-b", branch], check=True, cwd=repo_root)
 
-    pkg_dir = pkgs_dir / pkgname
-    subprocess.run(
-        ["git", "add", str(pkg_dir / "PKGBUILD"), str(pkg_dir / ".SRCINFO")],
-        check=True,
-        cwd=repo_root,
-    )
-    subprocess.run(
-        ["git", "commit", "-m", f"Update {pkgname} to {pkgver}"],
-        check=True,
-        cwd=repo_root,
-    )
-    subprocess.run(["git", "push", "-u", "origin", branch], check=True, cwd=repo_root)
+        # commit 1: current AUR state so the next commit shows a real diff
+        pkgs_dir = repo_root / "pkgs"
+        pkg_dir = pkgs_dir / pkgname
+        pkg_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(aur_dir / "PKGBUILD", pkg_dir / "PKGBUILD")
+        shutil.copy2(aur_dir / ".SRCINFO", pkg_dir / ".SRCINFO")
+        subprocess.run(
+            ["git", "add", str(pkg_dir / "PKGBUILD"), str(pkg_dir / ".SRCINFO")],
+            check=True,
+            cwd=repo_root,
+        )
+        subprocess.run(
+            ["git", "commit", "-m", f"Add current PKGBUILD and .SRCINFO for {pkgname}"],
+            check=True,
+            cwd=repo_root,
+        )
+
+        # commit 2: the actual version bump
+        update_pkgbuild_and_srcinfo(
+            pkgname,
+            pkgver,
+            source_url,
+            url_pattern,
+            checksum,
+            aur_dir,
+            pkgs_dir,
+            replace_pkgbuild_url=replace_pkgbuild_url,
+        )
+        subprocess.run(
+            ["git", "add", str(pkg_dir / "PKGBUILD"), str(pkg_dir / ".SRCINFO")],
+            check=True,
+            cwd=repo_root,
+        )
+        subprocess.run(
+            ["git", "commit", "-m", f"Update {pkgname} to {pkgver}"],
+            check=True,
+            cwd=repo_root,
+        )
+        subprocess.run(
+            ["git", "push", "-u", "origin", branch], check=True, cwd=repo_root
+        )
+
     subprocess.run(
         [
             "gh",
@@ -703,7 +805,7 @@ def create_update_pr(
         check=True,
         cwd=repo_root,
     )
-    subprocess.run(["git", "checkout", "main"], check=True, cwd=repo_root)
+    subprocess.run(["git", "checkout", "-"], check=True, cwd=repo_root)
     print(f"  [pr] Created PR: Update {pkgname} to {pkgver}")
 
 
