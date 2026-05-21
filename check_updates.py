@@ -105,7 +105,12 @@ def get_pypi_release_info(pypi_name: str, version: str) -> tuple[str, str]:
         data = json.loads(resp.read())
     for entry in data["urls"]:
         if entry["packagetype"] == "sdist":
-            return entry["url"], entry["digests"]["sha256"]
+            filename = entry["filename"]
+            source_url = (
+                f"https://files.pythonhosted.org/packages/source"
+                f"/{pypi_name[0]}/{pypi_name}/{filename}"
+            )
+            return source_url, entry["digests"]["sha256"]
     raise ValueError(f"No sdist found for {pypi_name} {version} on PyPI")
 
 
@@ -354,12 +359,14 @@ def update_pkgbuild_and_srcinfo(
     checksum: str,
     aur_dir: Path,
     pkgs_dir: Path,
+    replace_pkgbuild_url: bool = True,
 ) -> None:
     """Write updated PKGBUILD and .SRCINFO into *pkgs_dir*/{pkgname}/."""
     pkgbuild = (aur_dir / "PKGBUILD").read_text()
     pkgbuild = re.sub(r"^pkgver=.*", f"pkgver={pkgver}", pkgbuild, flags=re.MULTILINE)
     pkgbuild = re.sub(r"^pkgrel=.*", "pkgrel=1", pkgbuild, flags=re.MULTILINE)
-    pkgbuild = re.sub(url_pattern, lambda m: source_url, pkgbuild)
+    if replace_pkgbuild_url:
+        pkgbuild = re.sub(url_pattern, lambda m: source_url, pkgbuild)
 
     for varname in ("source", "source_x86_64"):
         entries = _parse_source_entries(pkgbuild, varname)
@@ -707,13 +714,17 @@ def create_update_pr(
             source_url, checksum = get_pypi_release_info(
                 pkg_config["pypi_name"], pkgver
             )
+            # the PKGBUILD source URL uses $pkgver — updating pkgver= is enough;
+            # only the .SRCINFO (which has a hardcoded URL) needs replacement
             url_pattern = r"https://files\.pythonhosted\.org/packages/[^\s'\"]+"
+            replace_pkgbuild_url = False
         else:
             checksum = get_checksum(pkg_config["url"], pkg_config["checksum_regex"])
             source_url = get_source_url(pkg_config["source_url_template"], raw_version)
             url_pattern = re.escape(pkg_config["source_url_template"]).replace(
                 re.escape("{raw_version}"), r"\S+"
             )
+            replace_pkgbuild_url = True
 
         subprocess.run(
             ["git", "config", "user.name", "github-actions[bot]"],
@@ -758,6 +769,7 @@ def create_update_pr(
             checksum,
             aur_dir,
             pkgs_dir,
+            replace_pkgbuild_url=replace_pkgbuild_url,
         )
         subprocess.run(
             ["git", "add", str(pkg_dir / "PKGBUILD"), str(pkg_dir / ".SRCINFO")],
