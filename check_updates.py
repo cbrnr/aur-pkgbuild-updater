@@ -781,11 +781,16 @@ def create_update_pr(
             check=True,
             cwd=repo_root,
         )
-        subprocess.run(
-            ["git", "commit", "-m", f"Add current PKGBUILD and .SRCINFO for {pkgname}"],
-            check=True,
+        has_staged_changes = subprocess.run(
+            ["git", "diff", "--cached", "--quiet"],
             cwd=repo_root,
-        )
+        ).returncode != 0
+        if has_staged_changes:
+            subprocess.run(
+                ["git", "commit", "-m", f"Add current PKGBUILD and .SRCINFO for {pkgname}"],
+                check=True,
+                cwd=repo_root,
+            )
 
         # commit 2: the actual version bump
         update_pkgbuild_and_srcinfo(
