@@ -277,8 +277,13 @@ def get_pkgbuild(pkgname: str, tmpdir: str) -> str | None:
             check=True,
             timeout=60,
         )
-    except subprocess.CalledProcessError as exc:
-        print(f"  [error] git clone failed: {exc.stderr.decode()[:200]}")
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        msg = (
+            exc.stderr.decode()[:200]
+            if isinstance(exc, subprocess.CalledProcessError) and exc.stderr
+            else str(exc)
+        )
+        print(f"  [error] git clone failed: {msg}")
         return None
     pkgbuild_path = Path(dest) / "PKGBUILD"
     if not pkgbuild_path.exists():
@@ -322,6 +327,35 @@ def _parse_source_entries(pkgbuild: str, varname: str = "source") -> list[str]:
         a or b or c
         for a, b, c in re.findall(r'"([^"]*)"' + r"|'([^']*)'" + r"|(\S+)", m.group(1))
     ]
+
+
+_CHECKSUM_TYPES = (
+    "b2sums",
+    "sha512sums",
+    "sha384sums",
+    "sha256sums",
+    "sha224sums",
+    "sha1sums",
+    "md5sums",
+)
+
+
+def _detect_sums_varname(
+    text: str, suffix: str = "", *, is_srcinfo: bool = False
+) -> str | None:
+    """Return the checksum variable/key actually used in *text* for *suffix*.
+
+    In PKGBUILD mode looks for ``varname=(``; in SRCINFO mode looks for ``\tkey = ``.
+    """
+    for ctype in _CHECKSUM_TYPES:
+        name = ctype + suffix
+        if is_srcinfo:
+            if re.search(rf"^\t{re.escape(name)} = ", text, re.MULTILINE):
+                return name
+        else:
+            if re.search(rf"^{re.escape(name)}=\(", text, re.MULTILINE):
+                return name
+    return None
 
 
 def _build_checksums(
@@ -375,13 +409,16 @@ def update_pkgbuild_and_srcinfo(
         entries = _parse_source_entries(pkgbuild, varname)
         if not entries:
             continue
-        sums_var = varname.replace("source", "sha256sums")
+        suffix = varname[len("source") :]
+        old_sums_var = _detect_sums_varname(pkgbuild, suffix)
+        new_sums_var = "sha256sums" + suffix
         checksums = _build_checksums(entries, checksum, aur_dir)
-        pkgbuild = re.sub(
-            rf"{sums_var}=\([^)]*\)",
-            _format_pkgbuild_array(sums_var, checksums),
-            pkgbuild,
-        )
+        if old_sums_var:
+            pkgbuild = re.sub(
+                rf"{re.escape(old_sums_var)}=\([^)]*\)",
+                _format_pkgbuild_array(new_sums_var, checksums),
+                pkgbuild,
+            )
 
     srcinfo = (aur_dir / ".SRCINFO").read_text()
     srcinfo = re.sub(r"pkgver = .*", f"pkgver = {pkgver}", srcinfo)
@@ -393,19 +430,22 @@ def update_pkgbuild_and_srcinfo(
     )
     srcinfo = re.sub(url_pattern, lambda m: source_url, srcinfo)
 
-    # replace each sha256sums block (main and x86_64) in order
+    # replace each checksum block (main and x86_64) in order
     for varname in ("source", "source_x86_64"):
         entries = _parse_source_entries(pkgbuild, varname)
         if not entries:
             continue
-        sums_key = "sha256sums" + varname[len("source") :]
+        suffix = varname[len("source") :]
+        new_sums_key = "sha256sums" + suffix
         checksums = _build_checksums(entries, checksum, aur_dir)
-        replacement = "\n".join(f"\t{sums_key} = {c}" for c in checksums)
-        srcinfo = re.sub(
-            rf"(\t{sums_key} = [^\n]+\n?)+",
-            replacement + "\n",
-            srcinfo,
-        )
+        replacement = "\n".join(f"\t{new_sums_key} = {c}" for c in checksums)
+        old_sums_key = _detect_sums_varname(srcinfo, suffix, is_srcinfo=True)
+        if old_sums_key:
+            srcinfo = re.sub(
+                rf"(\t{re.escape(old_sums_key)} = [^\n]+\n?)+",
+                replacement + "\n",
+                srcinfo,
+            )
 
     out_dir = pkgs_dir / pkgname
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -966,37 +1006,41 @@ def main() -> None:
             outdated_pkg_names.add(pkgname)
             print(f"  OUTDATED: {aur_pkgver} → {pkgver}")
 
-            if pkg_config.get("auto_push"):
-                create_update_pr(
-                    pkgname,
-                    pkgver,
-                    raw_version,
-                    pkg_config,
-                    repo_root,
-                    tmpdir,
-                    dry_run=args.dry_run,
-                )
-            else:
-                pkgbuild = get_pkgbuild(pkgname, tmpdir)
-                if not pkgbuild:
-                    print("  [error] Could not fetch PKGBUILD\n")
-                    continue
+            try:
+                if pkg_config.get("auto_push"):
+                    create_update_pr(
+                        pkgname,
+                        pkgver,
+                        raw_version,
+                        pkg_config,
+                        repo_root,
+                        tmpdir,
+                        dry_run=args.dry_run,
+                    )
+                else:
+                    pkgbuild = get_pkgbuild(pkgname, tmpdir)
+                    if not pkgbuild:
+                        print("  [error] Could not fetch PKGBUILD\n")
+                        continue
 
-                diff = generate_diff(pkgbuild, pkgver)
+                    diff = generate_diff(pkgbuild, pkgver)
 
-                if args.dry_run:
-                    print(f"  --- proposed diff ---\n{diff}")
+                    if args.dry_run:
+                        print(f"  --- proposed diff ---\n{diff}")
 
-                manage_update_issue(
-                    gh,
-                    pkgname,
-                    aur_version_str,
-                    pkgver,
-                    _upstream_url(pkgname, pkg_config),
-                    diff,
-                    open_issues,
-                    dry_run=args.dry_run,
-                )
+                    manage_update_issue(
+                        gh,
+                        pkgname,
+                        aur_version_str,
+                        pkgver,
+                        _upstream_url(pkgname, pkg_config),
+                        diff,
+                        open_issues,
+                        dry_run=args.dry_run,
+                    )
+            except Exception as exc:
+                print(f"  [error] {exc}\n")
+                continue
             print()
 
     # ---- Step 7: Close resolved issues ------------------------------------
