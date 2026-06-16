@@ -318,7 +318,10 @@ def _parse_source_entries(pkgbuild: str, varname: str = "source") -> list[str]:
     m = re.search(rf"{varname}=\(([^)]*)\)", pkgbuild, re.DOTALL)
     if not m:
         return []
-    return [a or b for a, b in re.findall(r'"([^"]*)"' + r"|'([^']*)'" , m.group(1))]
+    return [
+        a or b or c
+        for a, b, c in re.findall(r'"([^"]*)"' + r"|'([^']*)'" + r"|(\S+)", m.group(1))
+    ]
 
 
 def _build_checksums(
@@ -395,7 +398,7 @@ def update_pkgbuild_and_srcinfo(
         entries = _parse_source_entries(pkgbuild, varname)
         if not entries:
             continue
-        sums_key = "sha256sums" + varname[len("source"):]
+        sums_key = "sha256sums" + varname[len("source") :]
         checksums = _build_checksums(entries, checksum, aur_dir)
         replacement = "\n".join(f"\t{sums_key} = {c}" for c in checksums)
         srcinfo = re.sub(
@@ -657,9 +660,7 @@ def commit_and_push(config_path: Path, stale_keys: set[str]) -> None:
     subprocess.run(["git", "push"], check=True)
 
 
-def delete_stale_update_branches(
-    pkgname: str, repo_root: Path, dry_run: bool
-) -> None:
+def delete_stale_update_branches(pkgname: str, repo_root: Path, dry_run: bool) -> None:
     """Delete any remote update/{pkgname}/* branches left over from merged PRs."""
     result = subprocess.run(
         ["git", "ls-remote", "--heads", "origin", f"refs/heads/update/{pkgname}/*"],
@@ -781,13 +782,21 @@ def create_update_pr(
             check=True,
             cwd=repo_root,
         )
-        has_staged_changes = subprocess.run(
-            ["git", "diff", "--cached", "--quiet"],
-            cwd=repo_root,
-        ).returncode != 0
+        has_staged_changes = (
+            subprocess.run(
+                ["git", "diff", "--cached", "--quiet"],
+                cwd=repo_root,
+            ).returncode
+            != 0
+        )
         if has_staged_changes:
             subprocess.run(
-                ["git", "commit", "-m", f"Add current PKGBUILD and .SRCINFO for {pkgname}"],
+                [
+                    "git",
+                    "commit",
+                    "-m",
+                    f"Add current PKGBUILD and .SRCINFO for {pkgname}",
+                ],
                 check=True,
                 cwd=repo_root,
             )
