@@ -761,110 +761,113 @@ def create_update_pr(
         if json.loads(pr_check.stdout):
             print(f"  [skip] Branch and PR for {branch!r} already exist")
             return
-        # branch exists but PR is missing — fall through to PR creation only
+        # branch exists but no open PR — delete the stale branch so it gets
+        # regenerated fresh (it may have been created by an older buggy run)
+        subprocess.run(
+            ["git", "push", "origin", "--delete", branch],
+            check=True,
+            cwd=repo_root,
+        )
+        print(f"  [cleanup] Deleted stale branch {branch!r} (no open PR)")
+
+    # clone AUR repo to read current PKGBUILD and .SRCINFO
+    aur_dir = Path(tmpdir) / f"{pkgname}-aur"
+    subprocess.run(
+        [
+            "git",
+            "clone",
+            "--depth=1",
+            f"https://aur.archlinux.org/{pkgname}.git",
+            str(aur_dir),
+        ],
+        capture_output=True,
+        check=True,
+        timeout=60,
+    )
+
+    if pkg_config["source"] == "pypi":
+        source_url, checksum = get_pypi_release_info(pkg_config["pypi_name"], pkgver)
+        # the PKGBUILD source URL uses $pkgver — updating pkgver= is enough;
+        # only the .SRCINFO (which has a hardcoded URL) needs replacement
+        url_pattern = r"https://files\.pythonhosted\.org/packages/[^\s'\"]+"
+        replace_pkgbuild_url = False
     else:
-        # clone AUR repo to read current PKGBUILD and .SRCINFO
-        aur_dir = Path(tmpdir) / f"{pkgname}-aur"
+        checksum = get_checksum(pkg_config["url"], pkg_config["checksum_regex"])
+        source_url = get_source_url(pkg_config["source_url_template"], raw_version)
+        url_pattern = re.escape(pkg_config["source_url_template"]).replace(
+            re.escape("{raw_version}"), r"\S+"
+        )
+        replace_pkgbuild_url = True
+
+    subprocess.run(
+        ["git", "config", "user.name", "github-actions[bot]"],
+        check=True,
+        cwd=repo_root,
+    )
+    subprocess.run(
+        [
+            "git",
+            "config",
+            "user.email",
+            "github-actions[bot]@users.noreply.github.com",
+        ],
+        check=True,
+        cwd=repo_root,
+    )
+    subprocess.run(["git", "checkout", "-b", branch], check=True, cwd=repo_root)
+
+    # commit 1: current AUR state so the next commit shows a real diff
+    pkgs_dir = repo_root / "pkgs"
+    pkg_dir = pkgs_dir / pkgname
+    pkg_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(aur_dir / "PKGBUILD", pkg_dir / "PKGBUILD")
+    shutil.copy2(aur_dir / ".SRCINFO", pkg_dir / ".SRCINFO")
+    subprocess.run(
+        ["git", "add", str(pkg_dir / "PKGBUILD"), str(pkg_dir / ".SRCINFO")],
+        check=True,
+        cwd=repo_root,
+    )
+    has_staged_changes = (
+        subprocess.run(
+            ["git", "diff", "--cached", "--quiet"],
+            cwd=repo_root,
+        ).returncode
+        != 0
+    )
+    if has_staged_changes:
         subprocess.run(
             [
                 "git",
-                "clone",
-                "--depth=1",
-                f"https://aur.archlinux.org/{pkgname}.git",
-                str(aur_dir),
-            ],
-            capture_output=True,
-            check=True,
-            timeout=60,
-        )
-
-        if pkg_config["source"] == "pypi":
-            source_url, checksum = get_pypi_release_info(
-                pkg_config["pypi_name"], pkgver
-            )
-            # the PKGBUILD source URL uses $pkgver — updating pkgver= is enough;
-            # only the .SRCINFO (which has a hardcoded URL) needs replacement
-            url_pattern = r"https://files\.pythonhosted\.org/packages/[^\s'\"]+"
-            replace_pkgbuild_url = False
-        else:
-            checksum = get_checksum(pkg_config["url"], pkg_config["checksum_regex"])
-            source_url = get_source_url(pkg_config["source_url_template"], raw_version)
-            url_pattern = re.escape(pkg_config["source_url_template"]).replace(
-                re.escape("{raw_version}"), r"\S+"
-            )
-            replace_pkgbuild_url = True
-
-        subprocess.run(
-            ["git", "config", "user.name", "github-actions[bot]"],
-            check=True,
-            cwd=repo_root,
-        )
-        subprocess.run(
-            [
-                "git",
-                "config",
-                "user.email",
-                "github-actions[bot]@users.noreply.github.com",
+                "commit",
+                "-m",
+                f"Add current PKGBUILD and .SRCINFO for {pkgname}",
             ],
             check=True,
             cwd=repo_root,
         )
-        subprocess.run(["git", "checkout", "-b", branch], check=True, cwd=repo_root)
 
-        # commit 1: current AUR state so the next commit shows a real diff
-        pkgs_dir = repo_root / "pkgs"
-        pkg_dir = pkgs_dir / pkgname
-        pkg_dir.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(aur_dir / "PKGBUILD", pkg_dir / "PKGBUILD")
-        shutil.copy2(aur_dir / ".SRCINFO", pkg_dir / ".SRCINFO")
-        subprocess.run(
-            ["git", "add", str(pkg_dir / "PKGBUILD"), str(pkg_dir / ".SRCINFO")],
-            check=True,
-            cwd=repo_root,
-        )
-        has_staged_changes = (
-            subprocess.run(
-                ["git", "diff", "--cached", "--quiet"],
-                cwd=repo_root,
-            ).returncode
-            != 0
-        )
-        if has_staged_changes:
-            subprocess.run(
-                [
-                    "git",
-                    "commit",
-                    "-m",
-                    f"Add current PKGBUILD and .SRCINFO for {pkgname}",
-                ],
-                check=True,
-                cwd=repo_root,
-            )
-
-        # commit 2: the actual version bump
-        update_pkgbuild_and_srcinfo(
-            pkgname,
-            pkgver,
-            source_url,
-            url_pattern,
-            checksum,
-            aur_dir,
-            pkgs_dir,
-            replace_pkgbuild_url=replace_pkgbuild_url,
-        )
-        subprocess.run(
-            ["git", "add", str(pkg_dir / "PKGBUILD"), str(pkg_dir / ".SRCINFO")],
-            check=True,
-            cwd=repo_root,
-        )
-        subprocess.run(
-            ["git", "commit", "-m", f"Update {pkgname} to {pkgver}"],
-            check=True,
-            cwd=repo_root,
-        )
-        subprocess.run(
-            ["git", "push", "-u", "origin", branch], check=True, cwd=repo_root
-        )
+    # commit 2: the actual version bump
+    update_pkgbuild_and_srcinfo(
+        pkgname,
+        pkgver,
+        source_url,
+        url_pattern,
+        checksum,
+        aur_dir,
+        pkgs_dir,
+        replace_pkgbuild_url=replace_pkgbuild_url,
+    )
+    subprocess.run(
+        ["git", "add", str(pkg_dir / "PKGBUILD"), str(pkg_dir / ".SRCINFO")],
+        check=True,
+        cwd=repo_root,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", f"Update {pkgname} to {pkgver}"],
+        check=True,
+        cwd=repo_root,
+    )
+    subprocess.run(["git", "push", "-u", "origin", branch], check=True, cwd=repo_root)
 
     subprocess.run(
         [
