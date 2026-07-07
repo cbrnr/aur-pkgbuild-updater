@@ -104,6 +104,12 @@ pypi_name = "mnelab"
 upstream_url = "https://github.com/cbrnr/mnelab"
 auto_push = true
 
+[python-mnextend]
+source = "pypi"
+pypi_name = "mnextend"
+upstream_url = "https://github.com/cbrnr/mnextend"
+auto_push = true
+
 [python-pebble]
 source = "pypi"
 pypi_name = "pebble"
