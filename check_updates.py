@@ -797,7 +797,16 @@ def create_update_pr(
         url_pattern = re.escape(pkg_config["source_url_template"]).replace(
             re.escape("{raw_version}"), r"\S+"
         )
-        replace_pkgbuild_url = True
+        # if the source URL uses shell variable expansion (e.g. ${_pkgver}
+        # derived from pkgver), updating pkgver= is enough; only the .SRCINFO
+        # (which has a hardcoded URL) needs the URL replaced
+        pkgbuild_text = (aur_dir / "PKGBUILD").read_text()
+        replace_pkgbuild_url = not any(
+            "${" in e
+            for varname in ("source_x86_64", "source")
+            for e in _parse_source_entries(pkgbuild_text, varname)
+            if "://" in e
+        )
 
     subprocess.run(
         ["git", "config", "user.name", "github-actions[bot]"],
