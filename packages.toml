@@ -26,11 +26,15 @@
 #   source_url_template = "<template with {raw_version}>"
 #       Binary source URL template; {raw_version} is the version before any
 #       version_sub transforms.
-#   auto_push = true
-#       Push a PR with updated pkgs/{pkgname}/PKGBUILD and .SRCINFO instead
-#       of opening a GitHub issue. For source = "pypi", the checksum and
-#       source URL are fetched automatically from the PyPI JSON API; no
-#       additional fields are required.
+#   skip_build_check = true
+#       By default, an outdated package gets a candidate PKGBUILD/.SRCINFO
+#       rendered onto an update/{pkgname}/{pkgver} branch and build-verified
+#       with makepkg in CI: a successful build opens a PR, a failed build
+#       opens a "Build failed" issue with the log attached. Set this to skip
+#       CI entirely and fall back to a plain GitHub issue with manual
+#       makepkg -sri instructions instead — only for packages that can't be
+#       built in CI for reasons unrelated to correctness (e.g. interactive
+#       licensing, excessive build time).
 
 [edfbrowser]
 source = "website"
@@ -65,7 +69,6 @@ upstream_url = "https://sourceforge.net/p/bricxcc/code/"
 source = "pypi"
 pypi_name = "autoreject"
 upstream_url = "https://github.com/autoreject/autoreject"
-auto_push = true
 
 [python-biosig]
 source = "sourceforge"
@@ -78,55 +81,46 @@ upstream_url = "https://sourceforge.net/projects/biosig/"
 source = "pypi"
 pypi_name = "edfio"
 upstream_url = "https://github.com/the-siesta-group/edfio"
-auto_push = true
 
 [python-h5io]
 source = "pypi"
 pypi_name = "h5io"
 upstream_url = "https://github.com/h5io/h5io"
-auto_push = true
 
 [python-mne]
 source = "pypi"
 pypi_name = "mne"
 upstream_url = "https://github.com/mne-tools/mne-python"
-auto_push = true
 
 [python-mne-qt-browser]
 source = "pypi"
 pypi_name = "mne-qt-browser"
 upstream_url = "https://github.com/mne-tools/mne-qt-browser"
-auto_push = true
 
 [python-mnelab]
 source = "pypi"
 pypi_name = "mnelab"
 upstream_url = "https://github.com/cbrnr/mnelab"
-auto_push = true
 
 [python-mnextend]
 source = "pypi"
 pypi_name = "mnextend"
 upstream_url = "https://github.com/cbrnr/mnextend"
-auto_push = true
 
 [python-pebble]
 source = "pypi"
 pypi_name = "pebble"
 upstream_url = "https://github.com/noxdafox/pebble"
-auto_push = true
 
 [python-picard]
 source = "pypi"
 pypi_name = "python-picard"
 upstream_url = "https://github.com/pierreablin/picard"
-auto_push = true
 
 [python-pybv]
 source = "pypi"
 pypi_name = "pybv"
 upstream_url = "https://github.com/bids-standard/pybv"
-auto_push = true
 
 [rstudio-desktop-bin]
 source = "website"
@@ -135,25 +129,21 @@ version_regex = 'rstudio-([0-9]+\.[0-9]+\.[0-9]+-[0-9]+)-amd64\.deb'
 version_sub = [["-", "."]]
 checksum_regex = 'rstudio-[0-9]+\.[0-9]+\.[0-9]+-[0-9]+-amd64\.deb.*?([a-f0-9]{64})'
 source_url_template = "https://download1.rstudio.org/electron/jammy/amd64/rstudio-{raw_version}-amd64.deb"
-auto_push = true
 upstream_url = "https://posit.co/download/rstudio-desktop/"
 
 [python-pybvrf]
 source = "pypi"
 pypi_name = "pybvrf"
 upstream_url = "https://github.com/cbrnr/pybvrf"
-auto_push = true
 
 [python-pymatreader]
 source = "pypi"
 pypi_name = "pymatreader"
-auto_push = true
 
 [python-pyxdf]
 source = "pypi"
 pypi_name = "pyxdf"
 upstream_url = "https://github.com/xdf-modules/pyxdf"
-auto_push = true
 
 [sigviewer]
 source = "github"

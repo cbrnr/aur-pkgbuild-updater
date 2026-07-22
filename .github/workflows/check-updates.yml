@@ -6,20 +6,24 @@ on:
   workflow_dispatch:
 
 jobs:
-  check-updates:
+  detect:
     runs-on: ubuntu-latest
 
+    outputs:
+      matrix: ${{ steps.detect.outputs.matrix }}
+
     permissions:
-      contents: write       # needed to commit stale-entry removals to packages.toml
-      issues: write         # needed to open/close/update issues
-      pull-requests: write  # needed to open PRs for auto_push packages
+      contents: write       # commit packages.toml cleanups and push update branches
+      issues: write         # open/close/update issues
+      pull-requests: read   # `gh pr list` in render_and_push_branch's stale-branch check
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
         with:
           # Use the default GITHUB_TOKEN — contents:write permission above
-          # gives it push access so git push works for packages.toml cleanups.
+          # gives it push access so git push works for packages.toml cleanups
+          # and update branches.
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Python
@@ -39,8 +43,97 @@ jobs:
         run: sudo apt-get install -y --no-install-recommends subversion
 
       - name: Run update checker
+        id: detect
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_RUN_ID: ${{ github.run_id }}
-        run: uv run python check_updates.py
+        run: uv run python check_updates.py detect
+
+  build-verify:
+    needs: detect
+    if: needs.detect.outputs.matrix != '' && needs.detect.outputs.matrix != '[]'
+
+    strategy:
+      fail-fast: false
+      max-parallel: 3  # be polite to AUR's git/RPC infra
+      matrix:
+        include: ${{ fromJson(needs.detect.outputs.matrix) }}
+
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:base-devel
+    timeout-minutes: 30
+
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+
+    steps:
+      - name: Prep container (mirror, keyring, git)
+        run: |
+          echo 'Server = https://geo.mirror.pkgbuild.com/$repo/os/$arch' > /etc/pacman.d/mirrorlist
+          pacman -Sy --noconfirm --needed archlinux-keyring
+          pacman -Su --noconfirm --needed git sudo github-cli python python-packaging
+
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ matrix.branch }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          # fetch-depth 2 so `finalize` can `git diff HEAD~1 HEAD` to capture
+          # the version-bump diff for a build-failure issue (default depth 1
+          # would leave HEAD~1 unreachable and the diff empty).
+          fetch-depth: 2
+
+      - name: Create builder user
+        run: |
+          useradd -m builder
+          echo 'builder ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/builder
+
+      - name: Bootstrap paru-bin
+        run: |
+          sudo -H -u builder bash -c '
+            git clone https://aur.archlinux.org/paru-bin.git /tmp/paru-bin &&
+            cd /tmp/paru-bin && makepkg -si --noconfirm'
+
+      - name: Prepare build directory
+        # builder never touches the checked-out git repo (avoids git
+        # "dubious ownership" issues) — it only gets a copy of pkgs/{pkgname}.
+        run: |
+          cp -r "pkgs/${{ matrix.pkgname }}" /tmp/pkg
+          chown -R builder:builder /tmp/pkg
+
+      - name: Build package
+        id: build
+        continue-on-error: true
+        # `paru -Bi` builds the local PKGBUILD, resolving both repo and AUR
+        # dependencies automatically (then installing the built package) — this
+        # is what exercises the AUR-cross-dependency chains (e.g. python-mnelab
+        # -> python-mne -> ...) that plain `makepkg -s` cannot resolve on its
+        # own. NOTE: the exact paru flags/positional handling are NOT yet
+        # verified on a real Arch box — confirm in a `docker run
+        # archlinux:base-devel` session (or watch the first live run) before
+        # trusting this gate. The GHA bash default (`-o pipefail`) makes the
+        # step's exit status follow paru through the `tee`, so a failed build
+        # is correctly reported as a failed step.
+        run: |
+          sudo -H -u builder bash -c '
+            set -o pipefail
+            cd /tmp/pkg
+            paru -Bi --noconfirm --skipreview .
+          ' 2>&1 | tee build.log
+
+      - name: Finalize
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+        run: |
+          python check_updates.py finalize \
+            --pkgname ${{ matrix.pkgname }} \
+            --pkgver ${{ matrix.pkgver }} \
+            --branch ${{ matrix.branch }} \
+            --status ${{ steps.build.outcome == 'success' && 'success' || 'failure' }} \
+            --log-file build.log
