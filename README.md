@@ -4,7 +4,7 @@ Automatically checks all AUR packages of a given maintainer for upstream updates
 
 ## How it works
 
-A GitHub Actions workflow (`check-updates.yml`) runs hourly at minute 43 and can also be triggered manually via `workflow_dispatch`. The `detect` job:
+A GitHub Actions workflow (`check-updates.yml`) runs every 2 hours at minute 43 and can also be triggered manually via `workflow_dispatch`. The `detect` job:
 
 1. Fetches the live package list from the AUR maintainer API.
 2. Looks up the latest upstream version (PyPI, GitHub Releases, SourceForge RSS, website scraping, or SVN revision, depending on the package).
@@ -71,13 +71,13 @@ Also enable **"Allow GitHub Actions to create and approve pull requests"** under
 4. Set `maintainer` at the top of `packages.toml` to your **AUR username** (often not the same as your GitHub username). The inherited package entries can stay — the first run removes every package you do not maintain, together with its `pkgs/` directory. To skip the cleanup commit, delete the `[sections]` and `pkgs/*` yourself.
 5. Run the workflow once manually: Actions → *Check AUR Package Updates* → *Run workflow*. It opens an **"Add upstream config for X"** issue for every package of yours that has no `packages.toml` entry.
 6. Work through those issues by adding entries using the source-type tables above. The issues close automatically once the package is configured and current.
-7. From then on the hourly schedule takes over. Review the pull requests it opens; merging one pushes `PKGBUILD` and `.SRCINFO` to AUR.
+7. From then on the 2-hourly schedule takes over. Review the pull requests it opens; merging one pushes `PKGBUILD` and `.SRCINFO` to AUR.
 
 Setting `maintainer` is the only *required* change. The following are optional, but worth a look:
 
 | Where | What | Why |
 |-------|------|-----|
-| `.github/workflows/check-updates.yml` | The **cron minute** (`43 * * * *`) | Every instance created from this template inherits the same schedule. Pick your own minute so they don't all hit the AUR RPC at once. Drop to a few times a day (e.g. `'17 */6 * * *'`) if hourly is more than you need. |
+| `.github/workflows/check-updates.yml` | The **cron schedule** (`43 */2 * * *`) | Every instance created from this template inherits the same schedule. Pick your own minute so they don't all hit the AUR RPC at once. Drop to a few times a day (e.g. `'17 */6 * * *'`) if every 2 hours is more than you need. |
 | `.github/workflows/push-to-aur.yml` | The `branches:` filter (`main`) | Workflow event filters cannot use expressions, so this is a literal. Change it if your default branch is not `main`. |
 | `.github/workflows/check-updates.yml` | `max-parallel: 3` and `timeout-minutes: 30` | How many packages are build-verified at once, and how long a single build may take. Raise the timeout for slow-building packages. The builds themselves run on GitHub runners, but every job clones `paru-bin` from the AUR and lets `paru` clone and RPC-query each AUR dependency, so `max-parallel` also caps how much git/RPC traffic is aimed at the AUR at once. |
 

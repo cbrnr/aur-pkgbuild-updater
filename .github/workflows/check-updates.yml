@@ -2,9 +2,9 @@ name: Check AUR Package Updates
 
 on:
   schedule:
-    # hourly; pick a different minute in a copy of this repository so that
-    # instances don't all hit the AUR RPC at the same time
-    - cron: '43 * * * *'
+    # every 2 hours; pick a different minute in a copy of this repository so
+    # that instances don't all hit the AUR RPC at the same time
+    - cron: '43 */2 * * *'
   workflow_dispatch:
 
 jobs:
