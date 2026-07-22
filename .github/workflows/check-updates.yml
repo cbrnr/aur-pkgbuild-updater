@@ -2,6 +2,8 @@ name: Check AUR Package Updates
 
 on:
   schedule:
+    # hourly; pick a different minute in a copy of this repository so that
+    # instances don't all hit the AUR RPC at the same time
     - cron: '43 * * * *'
   workflow_dispatch:
 
@@ -38,8 +40,6 @@ jobs:
         run: uv sync
 
       - name: Install Subversion
-        # Required for nexttool-svn revision checking.
-        # Falls back to HTTP if unavailable, but having svn is more reliable.
         run: sudo apt-get install -y --no-install-recommends subversion
 
       - name: Run update checker
@@ -130,6 +130,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_RUN_ID: ${{ github.run_id }}
+          # PR target branch (`gh pr create --base`), so a fork whose default
+          # branch is not `main` works without editing the script
+          BASE_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           python check_updates.py finalize \
             --pkgname ${{ matrix.pkgname }} \

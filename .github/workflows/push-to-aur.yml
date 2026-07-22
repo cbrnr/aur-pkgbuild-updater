@@ -3,6 +3,8 @@ name: Push to AUR
 on:
   pull_request:
     types: [closed]
+    # `on:` filters cannot use expressions, so this is the literal default
+    # branch name — change it if yours is not `main`
     branches: [main]
 
 jobs:

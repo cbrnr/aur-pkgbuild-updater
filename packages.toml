@@ -1,6 +1,13 @@
-# Upstream source configuration for AUR packages maintained by cbrnr.
+# Upstream source configuration for the AUR packages of a single maintainer.
 # The package list itself is fetched live from the AUR maintainer API;
 # this file only maps package names to their upstream source metadata.
+#
+# The AUR username to track (this is the only setting to change when reusing
+# this repository via "Use this template" — note that it is the AUR account
+# name, which is often not the GitHub username):
+
+maintainer = "cbrnr"
+
 #
 # Supported source types and their required fields:
 #
