@@ -4,7 +4,7 @@ Automatically checks all [AUR packages maintained by cbrnr](https://aur.archlinu
 
 ## How it works
 
-A GitHub Actions workflow runs daily at 06:00 UTC (and can be triggered manually via `workflow_dispatch`). For each maintained package it:
+A GitHub Actions workflow runs hourly at minute 43 (and can be triggered manually via `workflow_dispatch`). For each maintained package it:
 
 1. Fetches the live package list from the AUR maintainer API.
 2. Looks up the latest upstream version (PyPI, GitHub Releases, SourceForge RSS, website scraping, or SVN revision, depending on the package).
