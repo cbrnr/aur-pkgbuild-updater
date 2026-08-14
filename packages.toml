@@ -131,10 +131,10 @@ upstream_url = "https://github.com/bids-standard/pybv"
 
 [rstudio-desktop-bin]
 source = "website"
-url = "https://live-rstudio.pantheonsite.io/download/rstudio-desktop/?posit_iframe=1"
-version_regex = 'rstudio-([0-9]+\.[0-9]+\.[0-9]+-[0-9]+)-amd64\.deb'
+url = "https://www.rstudio.com/wp-content/downloads.json"
+version_regex = '"basename": "rstudio-([0-9]+\.[0-9]+\.[0-9]+-[0-9]+)-amd64\.deb"'
 version_sub = [["-", "."]]
-checksum_regex = 'rstudio-[0-9]+\.[0-9]+\.[0-9]+-[0-9]+-amd64\.deb.*?([a-f0-9]{64})'
+checksum_regex = '"jammy".*?"sha256": "([a-f0-9]{64})"'
 source_url_template = "https://download1.rstudio.org/electron/jammy/amd64/rstudio-{raw_version}-amd64.deb"
 upstream_url = "https://posit.co/download/rstudio-desktop/"
 
