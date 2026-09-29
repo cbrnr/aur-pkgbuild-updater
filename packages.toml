@@ -29,10 +29,11 @@ maintainer = "cbrnr"
 #       pkgver (e.g. [["-", "."]] turns "2025.05.0-496" into "2025.05.0.496").
 #   checksum_regex = '<regex with one capture group>'
 #       Extracts a SHA256 hex string from the same url; matched with re.DOTALL
-#       so it can span lines.
+#       so it can span lines. If omitted, the source archive itself (at
+#       source_url_template) is downloaded and hashed directly instead.
 #   source_url_template = "<template with {raw_version}>"
 #       Binary source URL template; {raw_version} is the version before any
-#       version_sub transforms.
+#       version_sub transforms. Required for any source other than pypi.
 #   skip_build_check = true
 #       By default, an outdated package gets a candidate PKGBUILD/.SRCINFO
 #       rendered onto an update/{pkgname}/{pkgver} branch and build-verified
@@ -48,6 +49,8 @@ source = "website"
 url = "https://www.teuniz.net/edfbrowser/"
 version_regex = 'edfbrowser_(\d+)_source\.tar\.gz'
 version_compact = true
+source_url_template = "https://www.teuniz.net/edfbrowser/edfbrowser_{raw_version}_source.tar.gz"
+
 
 [libbiosig]
 source = "sourceforge"
@@ -155,3 +158,5 @@ upstream_url = "https://github.com/xdf-modules/pyxdf"
 [sigviewer]
 source = "github"
 github = "cbrnr/sigviewer"
+source_url_template = "https://github.com/cbrnr/sigviewer/archive/v{raw_version}.zip"
+
