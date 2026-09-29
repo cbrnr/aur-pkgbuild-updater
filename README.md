@@ -49,7 +49,7 @@ Optional fields (any source):
 |-------|-------------|
 | `upstream_url` | Overrides the link shown in issues/PRs. |
 | `version_sub` | List of `["pattern", "replacement"]` pairs applied via `re.sub` to transform the raw captured version into a valid `pkgver` (e.g. `[["-", "."]]` turns `"2025.05.0-496"` into `"2025.05.0.496"`). |
-| `checksum_regex` | Regex (with one capture group, matched with `re.DOTALL`) to extract a SHA256 hex string from the same `url`. Required for non-PyPI sources. |
+| `checksum_regex` | Regex (with one capture group, matched with `re.DOTALL`) to extract a SHA256 hex string from the same `url`. If omitted for non-PyPI sources, the source archive at `source_url_template` is downloaded and hashed directly instead. |
 | `source_url_template` | Binary source URL template; `{raw_version}` is the version string before any `version_sub` transforms. Required for non-PyPI sources. |
 | `skip_build_check` | If `true`, skip the CI build and open a plain issue with manual instructions instead. Only for packages that cannot be built in CI for reasons unrelated to correctness (interactive licensing, excessive build time). |
 

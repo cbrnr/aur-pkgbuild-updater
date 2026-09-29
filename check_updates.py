@@ -171,19 +171,13 @@ def get_sourceforge_version(project: str, path: str, version_regex: str) -> str:
     return sorted(versions, key=sort_key)[-1]
 
 
-def get_website_version(
-    url: str, version_regex: str, version_compact: bool = False
-) -> str:
+def get_website_version(url: str, version_regex: str) -> str:
     with urllib.request.urlopen(url, timeout=30) as resp:
         content = resp.read().decode("utf-8", errors="replace")
     m = re.search(version_regex, content)
     if not m:
         raise ValueError(f"Version regex '{version_regex}' found no match at {url}")
-    v = m.group(1)
-    if version_compact:
-        # e.g. "214" → "2.14"  (major = v[:-2], minor = v[-2:])
-        v = str(int(v) // 100) + "." + str(int(v) % 100)
-    return v
+    return m.group(1)
 
 
 def get_svn_revision(svn_url: str) -> str:
@@ -230,11 +224,7 @@ def get_upstream_version(pkg_config: dict, github_token: str | None = None) -> s
             pkg_config["version_regex"],
         )
     if source == "website":
-        return get_website_version(
-            pkg_config["url"],
-            pkg_config["version_regex"],
-            pkg_config.get("version_compact", False),
-        )
+        return get_website_version(pkg_config["url"], pkg_config["version_regex"])
     if source == "svn":
         return get_svn_revision(pkg_config["svn_url"])
     raise ValueError(f"Unknown source type: {source!r}")
@@ -248,6 +238,19 @@ def get_checksum(url: str, regex: str) -> str:
     if not m:
         raise ValueError(f"Checksum regex '{regex}' found no match at {url}")
     return m.group(1)
+
+
+def download_and_hash(url: str) -> str:
+    """Download *url* and return the SHA256 hex digest of its content.
+
+    Used as a fallback when upstream does not publish a checksum to scrape
+    with a ``checksum_regex``.
+    """
+    sha256 = hashlib.sha256()
+    with urllib.request.urlopen(url, timeout=300) as resp:
+        while chunk := resp.read(65536):
+            sha256.update(chunk)
+    return sha256.hexdigest()
 
 
 def get_source_url(template: str, raw_version: str) -> str:
@@ -892,8 +895,13 @@ def render_and_push_branch(
         url_pattern = r"https://files\.pythonhosted\.org/packages/[^\s'\"]+"
         replace_pkgbuild_url = False
     else:
-        checksum = get_checksum(pkg_config["url"], pkg_config["checksum_regex"])
         source_url = get_source_url(pkg_config["source_url_template"], raw_version)
+        if pkg_config.get("checksum_regex"):
+            checksum = get_checksum(pkg_config["url"], pkg_config["checksum_regex"])
+        else:
+            # no published checksum to scrape (e.g. GitHub release tarballs) —
+            # download the source archive itself and hash it
+            checksum = download_and_hash(source_url)
         url_pattern = re.escape(pkg_config["source_url_template"]).replace(
             re.escape("{raw_version}"), r"\S+"
         )
@@ -1175,6 +1183,9 @@ def cmd_detect(args: argparse.Namespace) -> None:
 
             raw_version = upstream_ver
             pkgver = raw_version
+            if pkg_config.get("version_compact"):
+                # e.g. "214" → "2.14"  (major = v[:-2], minor = v[-2:])
+                pkgver = str(int(pkgver) // 100) + "." + str(int(pkgver) % 100)
             for pattern, replacement in pkg_config.get("version_sub", []):
                 pkgver = re.sub(pattern, replacement, pkgver)
 
