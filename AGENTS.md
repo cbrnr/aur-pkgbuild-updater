@@ -39,3 +39,9 @@ Anything that must stay in a workflow because GitHub does not allow expressions 
 - Line length is 88 characters (the default). This limit applies to all code, including docstrings.
 - Docstrings follow [NumPy style](https://numpydoc.readthedocs.io/en/latest/format.html), but use standard Markdown syntax instead of reStructuredText. In particular, inline code uses single backticks (`` `x` ``), not double backticks (` ``x`` `).
 - Inline comments should start with a lower-case letter and be a single sentence where possible.
+
+## Commit messages
+
+- Use the imperative mood and start with a capital letter (e.g., `Fix crash when computing hash values`).
+- Keep the subject line concise (72 characters or fewer).
+- Do not credit yourself as an AI agent anywhere. This means no `Co-Authored-By` trailers or other attribution lines in commits, and no "Generated with" notes or similar in pull requests, issues, comments, or changelog entries.
