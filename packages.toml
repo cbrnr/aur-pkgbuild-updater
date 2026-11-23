@@ -51,6 +51,10 @@ version_regex = 'edfbrowser_(\d+)_source\.tar\.gz'
 version_compact = true
 source_url_template = "https://www.teuniz.net/edfbrowser/edfbrowser_{raw_version}_source.tar.gz"
 
+[kymo]
+source = "github"
+github = "cbrnr/kymo"
+source_url_template = "https://github.com/cbrnr/kymo/archive/refs/tags/v{raw_version}.tar.gz"
 
 [libbiosig]
 source = "sourceforge"
