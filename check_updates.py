@@ -409,6 +409,20 @@ def _format_pkgbuild_array(varname: str, values: list[str]) -> str:
     return "\n".join(lines)
 
 
+def _replace_destname_version(srcinfo: str, old: str, new: str) -> str:
+    """Replace *old* with *new* in the file names of `.SRCINFO` source entries.
+
+    Only the part before `::` changes; the URL after it is left as it is.
+    """
+
+    def replace(m: re.Match) -> str:
+        return m.group(1) + m.group(2).replace(old, new) + "::"
+
+    return re.sub(
+        r"^(\tsource(?:_\w+)? = )([^\n]*?)::", replace, srcinfo, flags=re.MULTILINE
+    )
+
+
 def update_pkgbuild_and_srcinfo(
     pkgname: str,
     pkgver: str,
@@ -442,7 +456,17 @@ def update_pkgbuild_and_srcinfo(
             )
 
     srcinfo = (aur_dir / ".SRCINFO").read_text()
+    old_pkgver = re.search(r"^\tpkgver = (\S+)", srcinfo, re.MULTILINE)
     srcinfo = re.sub(r"pkgver = .*", f"pkgver = {pkgver}", srcinfo)
+    # file names given as `name::url` that the PKGBUILD builds from pkgver hold the
+    # old version expanded in .SRCINFO
+    if old_pkgver and any(
+        "pkgver" in entry.split("::", 1)[0]
+        for varname in ("source", "source_x86_64")
+        for entry in _parse_source_entries(pkgbuild, varname)
+        if "::" in entry
+    ):
+        srcinfo = _replace_destname_version(srcinfo, old_pkgver.group(1), pkgver)
     srcinfo = re.sub(r"pkgrel = .*", "pkgrel = 1", srcinfo)
     srcinfo = re.sub(
         rf"provides = {re.escape(pkgname)}=.*",
