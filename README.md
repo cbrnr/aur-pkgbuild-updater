@@ -51,6 +51,7 @@ Optional fields (any source):
 | `version_sub` | List of `["pattern", "replacement"]` pairs applied via `re.sub` to transform the raw captured version into a valid `pkgver` (e.g. `[["-", "."]]` turns `"2025.05.0-496"` into `"2025.05.0.496"`). |
 | `checksum_regex` | Regex (with one capture group, matched with `re.DOTALL`) to extract a SHA256 hex string from the same `url`. If omitted for non-PyPI sources, the source archive at `source_url_template` is downloaded and hashed directly instead. |
 | `source_url_template` | Binary source URL template; `{raw_version}` is the version string before any `version_sub` transforms. Required for non-PyPI sources. |
+| `source_url_template_<arch>` | Source URL template for one architecture whose source differs from the one at `source_url_template` (e.g. `source_url_template_aarch64` for a PKGBUILD's `source_aarch64` array); that source is downloaded and hashed for its `sha256sums_<arch>`. `source_url_template` serves `source` and `source_x86_64`. |
 | `skip_build_check` | If `true`, skip the CI build and open a plain issue with manual instructions instead. Only for packages that cannot be built in CI for reasons unrelated to correctness (interactive licensing, excessive build time). |
 
 ## Setup

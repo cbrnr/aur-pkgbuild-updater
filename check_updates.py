@@ -258,6 +258,26 @@ def get_source_url(template: str, raw_version: str) -> str:
     return template.format(raw_version=raw_version)
 
 
+def get_url_pattern(template: str) -> str:
+    """Return a regex matching any URL expanded from *template*."""
+    return re.escape(template).replace(re.escape("{raw_version}"), r"\S+")
+
+
+def get_arch_templates(pkg_config: dict) -> dict[str, str]:
+    """Return the per-architecture source URL templates of *pkg_config*.
+
+    Keys are PKGBUILD array suffixes (e.g. `"_aarch64"` for
+    `source_url_template_aarch64`), for architectures whose source differs from the
+    one at `source_url_template`.
+    """
+    prefix = "source_url_template_"
+    return {
+        "_" + key[len(prefix) :]: value
+        for key, value in pkg_config.items()
+        if key.startswith(prefix)
+    }
+
+
 # --------------------------------------------------------------------------------------
 # Version comparison
 # --------------------------------------------------------------------------------------
@@ -418,22 +438,35 @@ def update_pkgbuild_and_srcinfo(
     aur_dir: Path,
     pkgs_dir: Path,
     replace_pkgbuild_url: bool = True,
+    arch_sources: dict[str, tuple[str, str, str]] | None = None,
 ) -> None:
-    """Write updated PKGBUILD and .SRCINFO into *pkgs_dir*/{pkgname}/."""
+    """Write updated PKGBUILD and .SRCINFO into *pkgs_dir*/{pkgname}/.
+
+    *arch_sources* maps PKGBUILD array suffixes (e.g. `"_aarch64"`) to the
+    `(source_url, url_pattern, checksum)` of architectures whose source differs from
+    the main one; the `source` and `source_x86_64` arrays get the main one.
+    """
+    arch_sources = arch_sources or {}
+    suffixes = ["", "_x86_64"] + [s for s in arch_sources if s not in ("", "_x86_64")]
+    sources = {
+        s: arch_sources.get(s, (source_url, url_pattern, checksum)) for s in suffixes
+    }
+
     pkgbuild = (aur_dir / "PKGBUILD").read_text()
     pkgbuild = re.sub(r"^pkgver=.*", f"pkgver={pkgver}", pkgbuild, flags=re.MULTILINE)
     pkgbuild = re.sub(r"^pkgrel=.*", "pkgrel=1", pkgbuild, flags=re.MULTILINE)
     if replace_pkgbuild_url:
-        pkgbuild = re.sub(url_pattern, lambda m: source_url, pkgbuild)
+        for url, pattern, _ in sources.values():
+            pkgbuild = re.sub(pattern, lambda m, url=url: url, pkgbuild)
 
-    for varname in ("source", "source_x86_64"):
+    for suffix, (_, _, arch_checksum) in sources.items():
+        varname = "source" + suffix
         entries = _parse_source_entries(pkgbuild, varname)
         if not entries:
             continue
-        suffix = varname[len("source") :]
         old_sums_var = _detect_sums_varname(pkgbuild, suffix)
         new_sums_var = "sha256sums" + suffix
-        checksums = _build_checksums(entries, checksum, aur_dir)
+        checksums = _build_checksums(entries, arch_checksum, aur_dir)
         if old_sums_var:
             pkgbuild = re.sub(
                 rf"{re.escape(old_sums_var)}=\([^)]*\)",
@@ -449,16 +482,17 @@ def update_pkgbuild_and_srcinfo(
         f"provides = {pkgname}={pkgver}",
         srcinfo,
     )
-    srcinfo = re.sub(url_pattern, lambda m: source_url, srcinfo)
+    for url, pattern, _ in sources.values():
+        srcinfo = re.sub(pattern, lambda m, url=url: url, srcinfo)
 
-    # replace each checksum block (main and x86_64) in order
-    for varname in ("source", "source_x86_64"):
+    # replace each checksum block (main and per architecture) in order
+    for suffix, (_, _, arch_checksum) in sources.items():
+        varname = "source" + suffix
         entries = _parse_source_entries(pkgbuild, varname)
         if not entries:
             continue
-        suffix = varname[len("source") :]
         new_sums_key = "sha256sums" + suffix
-        checksums = _build_checksums(entries, checksum, aur_dir)
+        checksums = _build_checksums(entries, arch_checksum, aur_dir)
         replacement = "\n".join(f"\t{new_sums_key} = {c}" for c in checksums)
         old_sums_key = _detect_sums_varname(srcinfo, suffix, is_srcinfo=True)
         if old_sums_key:
@@ -888,6 +922,7 @@ def render_and_push_branch(
         timeout=60,
     )
 
+    arch_sources: dict[str, tuple[str, str, str]] = {}
     if pkg_config["source"] == "pypi":
         source_url, checksum = get_pypi_release_info(pkg_config["pypi_name"], pkgver)
         # the PKGBUILD source URL uses $pkgver — updating pkgver= is enough;
@@ -902,19 +937,27 @@ def render_and_push_branch(
             # no published checksum to scrape (e.g. GitHub release tarballs) —
             # download the source archive itself and hash it
             checksum = download_and_hash(source_url)
-        url_pattern = re.escape(pkg_config["source_url_template"]).replace(
-            re.escape("{raw_version}"), r"\S+"
-        )
+        url_pattern = get_url_pattern(pkg_config["source_url_template"])
         # if the source URL uses shell variable expansion (e.g. ${_pkgver}
         # derived from pkgver), updating pkgver= is enough; only the .SRCINFO
         # (which has a hardcoded URL) needs the URL replaced
         pkgbuild_text = (aur_dir / "PKGBUILD").read_text()
+        arch_templates = get_arch_templates(pkg_config)
         replace_pkgbuild_url = not any(
             "${" in e
-            for varname in ("source_x86_64", "source")
+            for varname in ["source_x86_64", "source"]
+            + ["source" + suffix for suffix in arch_templates]
             for e in _parse_source_entries(pkgbuild_text, varname)
             if "://" in e
         )
+        # architectures with sources of their own are downloaded and hashed too
+        for suffix, template in arch_templates.items():
+            arch_url = get_source_url(template, raw_version)
+            arch_sources[suffix] = (
+                arch_url,
+                get_url_pattern(template),
+                download_and_hash(arch_url),
+            )
 
     subprocess.run(
         ["git", "config", "user.name", "github-actions[bot]"],
@@ -973,6 +1016,7 @@ def render_and_push_branch(
         aur_dir,
         pkgs_dir,
         replace_pkgbuild_url=replace_pkgbuild_url,
+        arch_sources=arch_sources,
     )
     subprocess.run(
         ["git", "add", str(pkg_dir / "PKGBUILD"), str(pkg_dir / ".SRCINFO")],

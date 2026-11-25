@@ -34,6 +34,12 @@ maintainer = "cbrnr"
 #   source_url_template = "<template with {raw_version}>"
 #       Binary source URL template; {raw_version} is the version before any
 #       version_sub transforms. Required for any source other than pypi.
+#   source_url_template_<arch> = "<template with {raw_version}>"
+#       Source URL template for one architecture whose source differs from the
+#       one at source_url_template (e.g. source_url_template_aarch64 for a
+#       PKGBUILD's source_aarch64 array); that source is downloaded and hashed
+#       for its sha256sums_<arch>. source_url_template serves source and
+#       source_x86_64.
 #   skip_build_check = true
 #       By default, an outdated package gets a candidate PKGBUILD/.SRCINFO
 #       rendered onto an update/{pkgname}/{pkgver} branch and build-verified
@@ -55,6 +61,12 @@ source_url_template = "https://www.teuniz.net/edfbrowser/edfbrowser_{raw_version
 source = "github"
 github = "cbrnr/kymo"
 source_url_template = "https://github.com/cbrnr/kymo/archive/refs/tags/v{raw_version}.tar.gz"
+
+[kymo-bin]
+source = "github"
+github = "cbrnr/kymo"
+source_url_template = "https://github.com/cbrnr/kymo/releases/download/v{raw_version}/kymo-{raw_version}-linux-x86_64.tar.gz"
+source_url_template_aarch64 = "https://github.com/cbrnr/kymo/releases/download/v{raw_version}/kymo-{raw_version}-linux-arm64.tar.gz"
 
 [libbiosig]
 source = "sourceforge"
