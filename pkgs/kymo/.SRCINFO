@@ -1,0 +1,26 @@
+pkgbase = kymo
+	pkgdesc = Viewer for large EEG and MEG recordings
+	pkgver = 0.2.0
+	pkgrel = 1
+	url = https://github.com/cbrnr/kymo
+	arch = x86_64
+	arch = aarch64
+	license = BSD-3-Clause
+	makedepends = cargo
+	depends = libgcc
+	depends = glibc
+	depends = hicolor-icon-theme
+	depends = libxkbcommon
+	depends = vulkan-icd-loader
+	depends = wayland
+	depends = libx11
+	depends = libxcursor
+	depends = libxi
+	depends = libxrandr
+	depends = xdg-desktop-portal
+	optdepends = vulkan-driver: GPU rendering (mesa or the vendor driver provide one)
+	options = !lto
+	source = kymo-0.2.0.tar.gz::https://github.com/cbrnr/kymo/archive/refs/tags/v0.2.0.tar.gz
+	sha256sums = a3783f66757554f9dfd44d2bc2bbecb625741b427d1ded6c13edf7d0b94f6539
+
+pkgname = kymo
